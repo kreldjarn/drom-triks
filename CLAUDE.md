@@ -69,3 +69,5 @@ needs that operator specifically.
   naming a specific model.
 - Don't commit or push unless asked.
 - `build/` and `lib/*/build/` are gitignored — never commit build artifacts.
+- `ruff.toml` excludes `lib/`; without it a pre-commit `ruff check` reports thousands of
+  findings from vendored CMSIS Python tooling that we don't own.

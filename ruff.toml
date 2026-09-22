@@ -1,0 +1,5 @@
+# This is a C++ firmware project; the only Python here is vendored inside the
+# libDaisy/DaisySP submodules (CMSIS-DSP's tooling), which reports thousands of
+# findings we neither own nor can fix. Excluding it keeps a pre-commit `ruff
+# check` meaningful rather than noise to be scrolled past.
+extend-exclude = ["lib/"]
