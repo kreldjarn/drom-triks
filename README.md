@@ -82,4 +82,11 @@ Tight/Smooth tradeoff exposed as a user setting. Locked to a 90 BPM master, the 
 step spacing to **1 sample (0.02 ms)**; under ±1 ms source jitter, Smooth keeps the tempo
 estimate inside **0.06 BPM**.
 
-Next: pattern chaining, the UI state machine, and the KiCad schematic — all still board-free.
+**UI state machine done.** Panel logic as pure state — step editing, track select, mute, soft
+takeover on the pots, and parameter locks written by holding a step and turning a knob. Testable
+headless, so the interaction model is verified before a panel exists.
+
+**Patch format done.** A patch is a `Pattern` plus a `Kit`, saved with a versioned header so a
+firmware change rejects stale flash rather than reinterpreting it.
+
+Next: pattern chaining, the LED/display layer, and the KiCad schematic — all still board-free.

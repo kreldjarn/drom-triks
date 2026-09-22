@@ -157,7 +157,7 @@ otherwise.
 ## 6. Sequencer data model
 
 ```cpp
-struct ParamLock { uint8_t param_id; uint16_t value; };   // 3 bytes
+struct ParamLock { uint8_t param_id; uint16_t value; };   // 4 bytes (2-byte aligned)
 
 struct Step {
     uint8_t   flags;        // active | accent | tie
@@ -167,14 +167,15 @@ struct Step {
     uint8_t   ratchet;      // 1–8 retriggers
     uint8_t   lock_count;
     ParamLock locks[4];
-};                                              // 18 bytes
+};                                              // 22 bytes
 
 struct Track  { Step steps[64]; uint8_t length; uint8_t speed; uint8_t direction; };
 struct Pattern{ Track tracks[8]; uint16_t bpm_x10; uint8_t swing; uint8_t kit_id; };
 ```
 
-**~9.2 kB per pattern.** 128 patterns is 1.2 MB — nothing against 64 MB of SDRAM, and it
-persists comfortably into the 8 MB QSPI with room for kits and wear-levelling.
+**11.0 kB per pattern** (measured, not estimated — `ParamLock` aligns to 4 bytes, not 3, which
+takes `Step` to 22). 128 patterns is **1.38 MB** against the ~7 MB of writable QSPI, so there is
+no reason to pack the struct and pay for unaligned access.
 
 Per-track `length` and `speed` give polymeter for free: a 7-step hat track against a 16-step
 kick is one byte of state and the single highest ratio of musical interest to implementation
@@ -192,7 +193,7 @@ its probability) up to three times per tick.
 
 **Parameter locks** are the feature worth building the data model around. Hold a step key, turn
 a pot, and that pot's value is recorded for that step only. Four lock slots per step is plenty in
-practice and keeps `Step` at a cache-friendly 18 bytes.
+practice and keeps `Step` at a cache-friendly 22 bytes.
 
 The mechanism lives in `VoiceSlot`, which owns the **base** value of every parameter — what the
 knob says — separately from what the voice currently holds:
@@ -265,6 +266,38 @@ Always pass the offset explicitly:
 ```cpp
 storage.Init(defaults, 0x100000);   // never Init(defaults)
 ```
+
+### Why not a ValueTree
+
+A JUCE-style `AudioProcessorValueTreeState` is the obvious reach for "how do we save patches",
+and it is the wrong tool here. It exists to solve problems this machine does not have — host
+automation, thread-safe parameter passing from a GUI thread, undo, dynamic parameter discovery —
+and it brings observers, pointer chasing and allocation, all of which are hostile to an audio
+callback that must not allocate.
+
+Meanwhile `Pattern` is **trivially copyable**, so saving really is a `memcpy` and
+`PersistentStorage<Patch>` works as-is. A tree would mean writing a serialiser to get back to
+where we already are.
+
+Two things a ValueTree *would* have given us are worth taking on their own:
+
+**A static parameter descriptor table** (`src/engine/params.h`). One `constexpr` place that knows
+each parameter's name and default, living in flash, costing nothing at runtime. That is what the
+display and MIDI learn need.
+
+**A versioned save format** (`src/io/patch.h`). This is the one that bites. Because saving is a
+memcpy, adding a single field to `Step` silently reinterprets every pattern already in flash —
+and the result *sounds like corruption*, not like a version mismatch, so it is unobvious enough
+to cost an evening. Every save carries a header:
+
+```cpp
+struct SaveHeader { uint32_t magic; uint16_t version; uint16_t payload_size; };
+```
+
+On load, a mismatch is **rejected, never reinterpreted**; the caller falls back to defaults.
+
+A **patch** is a `Pattern` plus a `Kit` — the sequence and the eight voices' base parameter
+values. Held separately because a kit is worth reusing across patterns.
 
 **Do flash writes from the main loop, never the audio callback**, and prefer to write on an
 explicit save action rather than autosaving during playback. With `BOOT_SRAM` a QSPI write

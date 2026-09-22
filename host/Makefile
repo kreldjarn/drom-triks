@@ -46,7 +46,7 @@ locktest: $(LOCKTEST)
 	$(LOCKTEST)
 
 .PHONY: test
-test: seqtest locktest clocktest
+test: seqtest locktest clocktest uitest
 	@$(BUILD_DIR)/render --selftest
 
 CLOCKTEST := $(BUILD_DIR)/clocktest
@@ -56,3 +56,11 @@ $(CLOCKTEST): clocktest.cpp $(wildcard ../src/seq/*.h) | $(BUILD_DIR)
 .PHONY: clocktest
 clocktest: $(CLOCKTEST)
 	$(CLOCKTEST)
+
+UITEST := $(BUILD_DIR)/uitest
+$(UITEST): uitest.cpp $(wildcard ../src/ui/*.h) $(wildcard ../src/io/*.h) | $(BUILD_DIR)
+	$(CXX) $(CXXFLAGS) uitest.cpp -o $@
+
+.PHONY: uitest
+uitest: $(UITEST)
+	$(UITEST)
