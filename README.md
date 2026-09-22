@@ -1,0 +1,33 @@
+# drom-triks
+
+A synthesis-based hardware drum machine built on the [Electrosmith Daisy](https://daisy.audio)
+platform: 8 synth voices, a 16-step x0x-style sequencer with parameter locks, and a
+panel of real knobs, encoders and backlit keys.
+
+Sample playback and analog voice circuitry are explicit future phases. Both are planned for
+rather than retrofitted: the voice layer is built around an interface that a sample player or an
+analog voice can implement without touching the sequencer, and the v1 PCB reserves the power,
+trigger and audio-return paths an analog daughterboard will need.
+
+## Documents
+
+| Doc | Contents |
+| --- | --- |
+| [docs/01-hardware.md](docs/01-hardware.md) | Board choice, panel layout, I/O topology, pin budget, analog/power design |
+| [docs/02-firmware.md](docs/02-firmware.md) | Module layout, timing model, voice engine, sequencer data model, UI state machine |
+| [docs/03-bom.md](docs/03-bom.md) | Bill of materials with part numbers and costed lines |
+| [docs/04-development-plan.md](docs/04-development-plan.md) | Phased build plan, milestones, risk register |
+| [docs/05-analog-expansion.md](docs/05-analog-expansion.md) | Hybrid architectures and what v1 must reserve |
+
+## Design targets
+
+- 8 voices, all synthesised, ~20% CPU at 48 kHz — headroom for FX, samples and analog hybrids
+- Sample-accurate trigger timing (no block-quantised jitter), digital and analog alike
+- Parameter locks per step, Elektron-style: hold a step, turn a knob
+- Everything editable without entering a menu; the screen explains, it doesn't gate
+- Powered and programmed over a single USB-C cable
+
+## Status
+
+Planning. No firmware yet — start at
+[Phase 0](docs/04-development-plan.md#phase-0--toolchain-1-week).
