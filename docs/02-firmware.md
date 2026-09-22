@@ -226,18 +226,34 @@ Modes, with `SHIFT` as a held modifier rather than a latched state:
 **LED language** — consistent enough to read without thinking:
 
 - Step key: off = inactive; dim→bright = velocity; hue = track colour
-- Playhead: white flash on the current step
-- Locked step: hue shifted toward white, or a slow pulse
+- Playhead: white, and it **wins over everything** — it is the one thing you track with your eyes
+  while playing, so it must never be ambiguous
+- Locked step: hue shifted toward white with a slow pulse. Measured at equal velocity, a locked
+  step reads 0.42 whiteness against 0.12 for a plain one
 - Track key: hue = track identity; dim = has content; bright = selected; red = muted
+- An active step never renders below 25 % brightness, so velocity 1 is still visibly on
+
+**The renderer enforces the current budget.** Thirty SK6812s at full white draw **1.8 A**, far past
+any USB supply, and a per-LED clamp cannot see the total — only the whole frame knows the sum. So
+`LedRenderer` scales the entire frame if it would exceed **400 mA**, which leaves headroom on a
+500 mA port. The worst case the panel can actually produce measures **397 mA**.
 
 The screen *explains* — it shows the parameter name and value when you touch a knob, and the
 pattern overview otherwise. It never becomes the only way to reach a function. If a feature
 requires menu diving, it's mis-designed.
 
 **Soft takeover on pots is mandatory**, since six physical knobs address eight voices. When you
-switch tracks, the knob positions no longer match the stored values. Use pickup mode (the
-parameter doesn't move until the knob crosses the stored value) with the screen showing both
-the physical and stored positions so the jump is visible rather than mysterious.
+switch tracks, the knob positions no longer match the stored values. Pickup mode: the parameter
+doesn't move until the knob crosses the stored value.
+
+The screen has to explain that, or the knob simply feels broken — you turn it, nothing happens,
+and nothing says why. While a pot is uncaught the display shows both positions and what to do:
+
+```
+BD   TUNE
+knob  25 ->  90
+turn to pick up
+```
 
 ## 8. Persistence
 

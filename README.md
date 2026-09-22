@@ -96,4 +96,8 @@ each audio block, and reads back a small struct of relaxed atomics — the threa
 [docs/02-firmware.md §4](docs/02-firmware.md#4-threading-model), implemented and tested with a
 real two-thread producer/consumer run.
 
-Next: pattern chaining, the LED/display layer, and master FX — all still board-free.
+**LED and display rendering done.** Both are pure functions of machine + UI state, so the whole
+LED language is verified headless — including the frame-level **current budget**, which keeps the
+panel under 400 mA where an unclamped all-white frame would pull 1.8 A.
+
+Next: pattern chaining, master FX, and the MIDI note/CC layer — all still board-free.

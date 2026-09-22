@@ -13,6 +13,11 @@ struct Kit
     char  name[16];
 };
 
+/// Fixed track identities. The panel is legended in silkscreen, so these are
+/// not user-editable and can live in flash.
+inline constexpr const char *kTrackName[kNumTracks]
+    = {"BD", "SD", "CH", "OH", "LT", "CP", "RS", "FM"};
+
 inline constexpr uint32_t kPatchMagic   = 0x4D4F5244; // 'DROM'
 inline constexpr uint16_t kPatchVersion = 1;
 

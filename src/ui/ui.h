@@ -46,6 +46,9 @@ class Ui
 
     // ---- input ------------------------------------------------------------
 
+    /// Called from the main loop with a free-running millisecond counter.
+    void SetTime(uint32_t ms) { now_ms_ = ms; }
+
     void SetShift(bool held) { shift_ = held; }
 
     void SetMode(Mode m) { mode_ = m; }
@@ -102,6 +105,9 @@ class Ui
         const ParamId id     = static_cast<ParamId>(pot);
         const float   stored = StoredValue(id);
 
+        last_pot_    = pot;
+        last_pot_ms_ = now_ms_;
+
         // Soft takeover (pickup). Six knobs address eight voices, so after a
         // track change the physical position is meaningless. The parameter
         // stays put until the knob passes through the stored value, which
@@ -146,6 +152,18 @@ class Ui
     bool pot_caught(int pot) const { return pot >= 0 && pot < kNumPots && caught_[pot]; }
 
     float value(ParamId id) const { return StoredValue(id); }
+
+    /// Which pot was touched most recently, and how long ago. The display uses
+    /// this to explain the knob you are actually holding.
+    int      last_pot() const { return last_pot_; }
+    uint32_t since_last_pot_ms() const { return now_ms_ - last_pot_ms_; }
+
+    /// Where the knob physically sits, which after a track change may be a
+    /// long way from the stored value.
+    float last_raw(int pot) const
+    {
+        return (pot >= 0 && pot < kNumPots) ? last_raw_[pot] : 0.f;
+    }
 
     bool step_active(int step) const
     {
@@ -193,8 +211,11 @@ class Ui
         machine_->Push(c);
     }
 
-    Machine *machine_ = nullptr;
-    Mode     mode_    = Mode::Play;
+    Machine *machine_     = nullptr;
+    Mode     mode_        = Mode::Play;
+    uint32_t now_ms_      = 0;
+    uint32_t last_pot_ms_ = 0;
+    int      last_pot_    = -1;
     int    selected_track_ = 0;
     int    held_step_      = -1;
     bool   shift_          = false;
