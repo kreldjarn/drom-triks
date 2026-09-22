@@ -1,0 +1,14 @@
+# Build artifacts
+build/
+*.o
+*.d
+*.elf
+*.bin
+*.hex
+*.map
+*.lst
+
+# Editor / OS
+.DS_Store
+.vscode/ipch/
+compile_commands.json

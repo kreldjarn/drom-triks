@@ -13,11 +13,12 @@ pattern data can live.
 | APP_TYPE | Program space | QSPI available for data? |
 | --- | --- | --- |
 | `BOOT_NONE` | 128 kB internal flash | Yes, but 128 kB is too small |
-| **`BOOT_SRAM`** | **480 kB** (bootloader reserves 32 kB at the end of SRAM) | **Yes — all 8 MB** |
+| **`BOOT_SRAM`** | **480 kB** (bootloader reserves 32 kB at the end of SRAM) | **Yes — ~7 MB above the app image** |
 | `BOOT_QSPI` | ~7.75 MB | No — the program lives there, and execution is slower |
 
 `BOOT_SRAM` gives 480 kB of program space, which is far more than this firmware needs, runs at
-internal-flash speed, and leaves the **entire 8 MB QSPI free for patterns, kits and settings**.
+internal-flash speed, and leaves **~7 MB of QSPI writable for patterns, kits and settings** —
+everything above the staged app image (see §8 for the layout).
 
 The alternative bites specifically here: with `BOOT_QSPI` the program executes from QSPI in
 memory-mapped mode, and *writing* to QSPI while executing from it hard-faults. You would
@@ -215,14 +216,30 @@ the physical and stored positions so the jump is visible rather than mysterious.
 
 ## 8. Persistence
 
-QSPI flash via libDaisy's `PersistentStorage`, laid out in slots:
+QSPI flash via libDaisy's `PersistentStorage`, laid out in slots.
+
+**The app image lives in QSPI too, and user data must start above it.** Under `BOOT_SRAM` the
+image is staged at chip offset `0x40000` and can grow to the 480 kB SRAM limit, so the first
+1 MB of the chip is off limits:
 
 ```
-0x000000  settings      (4 kB)   global config, calibration
-0x001000  kits          (256 kB) 32 kits × 8 voices × params
-0x041000  patterns      (2 MB)   128 patterns
-0x241000  songs         (64 kB)  pattern chains
-0x251000  free          (~5.7 MB) reserved for sample data
+0x000000  reserved      (256 kB)  Daisy boot layout — do not touch
+0x040000  app image     (480 kB)  staged here, copied to SRAM at boot
+0x0B8000  slack         (288 kB)
+─────────────────────────────────  user data starts at the 1 MB mark
+0x100000  settings      (4 kB)    global config, calibration
+0x101000  kits          (256 kB)  32 kits × 8 voices × params
+0x141000  patterns      (2 MB)    128 patterns
+0x341000  songs         (64 kB)   pattern chains
+0x351000  free          (~4.7 MB) reserved for sample data
+```
+
+`PersistentStorage::Init()` **defaults its offset to 0**, which would place settings directly on
+top of the app image — the first pattern save would corrupt the firmware executing that save.
+Always pass the offset explicitly:
+
+```cpp
+storage.Init(defaults, 0x100000);   // never Init(defaults)
 ```
 
 **Do flash writes from the main loop, never the audio callback**, and prefer to write on an

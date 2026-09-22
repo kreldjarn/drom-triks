@@ -1,0 +1,19 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Debug (ST-Link)",
+      "type": "cortex-debug",
+      "request": "launch",
+      "servertype": "openocd",
+      "cwd": "${workspaceFolder}",
+      "executable": "${workspaceFolder}/build/drom-triks.elf",
+      "device": "STM32H750IBKx",
+      "configFiles": ["interface/stlink.cfg", "target/stm32h7x.cfg"],
+      "preLaunchTask": "build",
+      "runToEntryPoint": "main",
+      "svdFile": "${workspaceFolder}/.vscode/STM32H750x.svd",
+      "showDevDebugOutput": "none"
+    }
+  ]
+}
