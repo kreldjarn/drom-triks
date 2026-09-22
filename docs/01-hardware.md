@@ -24,8 +24,11 @@ Seed3 specs that drive the rest of this design:
 
 Two Seed3 caveats worth knowing up front:
 
-- The **JTAG header ships unpopulated**. Solder a 2×5 1.27 mm header on before you start, or
-  you will be debugging a real-time audio system with printf over USB. Do this on day one.
+- The **JTAG header ships unpopulated** (the 2×20 main pin headers do come pre-soldered). Fit a
+  **10-pin 2×5 1.27 mm** header *centred on the 14-position footprint* — the outer two positions
+  each side are unwired alignment aids for a 14-pin ST-LINK-V3MINIE cable, so soldering flush to
+  one end misaligns every signal. Do this on day one, or you will be debugging a real-time audio
+  system with printf over USB.
 - The **output stage is unverified** in this plan. The TAC5242 supports both differential and
   single-ended output, and the Seed3 schematic does not state which configuration Electrosmith
   used. Download the Seed3 schematic PDF and confirm before committing the output stage to

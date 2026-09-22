@@ -8,8 +8,8 @@ move. Re-cost before ordering.
 
 | Qty | Part | Example P/N | Unit | Ext | Notes |
 | ---: | --- | --- | ---: | ---: | --- |
-| 1 | Daisy Seed3 (with headers) | — | $29.99 | $29.99 | **Verified price.** JTAG header ships unpopulated |
-| 1 | 2×5 1.27 mm header | — | $0.50 | $0.50 | Solder to the JTAG pads on day one |
+| 1 | Daisy Seed3 (with headers) | — | $29.99 | $29.99 | **Verified price.** 2×20 pin headers pre-soldered; JTAG pads bare |
+| 1 | 2×5 1.27 mm header, 10-pin | Amphenol 20021111-00010T4LF | $0.50 | $0.50 | JTAG pads ship bare; fit **centred** on the 14-position footprint |
 | 1 | ST-Link V3 MINIE | — | $12.00 | $12.00 | One-time tool cost; reusable |
 | 5 | Main PCB, 4-layer, ~180×100 mm | JLCPCB | $8.00 | $40.00 | 4-layer for the ground plane; qty 5 minimum |
 | 2 | 20-pin female header (Seed3 socket) | — | $1.00 | $2.00 | Socket it — do not solder the module down |

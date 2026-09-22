@@ -70,11 +70,29 @@ Then flash the app the same way with `make program-dfu`.
 
 ## 4. Solder the JTAG header
 
-**Do this before writing any Phase 1 code.** The Seed3 ships with the JTAG pads unpopulated.
-Solder a 2×5 1.27 mm header and connect an ST-Link V3 MINIE.
+Two different headers, don't confuse them:
 
-The alternative is debugging a real-time audio system with printf, which does not work: the act
-of printing from an audio callback changes the timing you are trying to observe.
+- The **2×20 main pin headers** (the ones that meet a breadboard) **come pre-soldered** on the
+  standard Seed3. Nothing to do.
+- The **JTAG/SWD debug header is unpopulated.** Electrosmith left it off deliberately, to cut
+  height and cost and because it got in the way of commercial customers embedding the module.
+
+**Solder it before writing any Phase 1 code.** The alternative is debugging a real-time audio
+system with printf, which does not work: printing from an audio callback changes the timing you
+are trying to observe.
+
+### The gotcha
+
+The footprint has **14 positions**, but the header you want is a **10-pin (2×5) 1.27 mm** part —
+e.g. Amphenol **20021111-00010T4LF**. The four extra positions are not wired to anything; they
+exist only to help a 14-pin ST-LINK-V3MINIE cable align.
+
+**Install the 10-pin header centred on the footprint, leaving two positions free at each end.**
+Soldering it flush to one end puts every pin on the wrong signal. Centred, it also works with
+older ST-Links and J-Link probes.
+
+Electrosmith's orientation photos show a Seed Rev7 rather than a Seed3, but the wiring is the
+same.
 
 ## 5. The debug loop
 
