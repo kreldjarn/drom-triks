@@ -184,6 +184,32 @@ straight off clock bytes throws that precision away.
    indicator**. Switching sync silently is miserable to debug on stage.
 5. **Timeout**: no clock for ~500 ms → fall back to internal at the last-known tempo, don't stop.
 
+### Acquisition is a separate problem from tracking
+
+The loop gains that reject jitter are far too sluggish to *find* an unknown tempo — from a
+120 BPM start, Smooth gains need thousands of clocks to reach 174. So the first four clocks seed
+the period directly from the measured interval, and the loop takes over after that. Measured:
+**within 1 BPM of a 174 BPM source in 2 clocks**, about a twelfth of a beat.
+
+### Outlier rejection
+
+A dropped or doubled byte must not be filtered as though it were tempo information; one glitch
+would drag the estimate for seconds. Any interval more than half a period off is treated as a
+resync rather than a measurement.
+
+### Measured behaviour
+
+From `make -C host clocktest`:
+
+| | Tight | Smooth |
+| --- | ---: | ---: |
+| Tempo spread under ±1 ms jitter | 0.40 BPM | **0.06 BPM** |
+| Follows a 120→140 ramp | closer | laggier |
+
+Under USB-style 1 ms frame quantisation, Smooth holds tempo to within 0.01 BPM. Driving the
+sequencer from a 90 BPM master, steady-state step spacing is within **1 sample (0.02 ms)** of the
+master's grid.
+
 ### Transmit
 
 Emit clock from the audio callback's tick evaluation, at the sample the tick lands on — not from

@@ -77,4 +77,9 @@ decision.
 directions, and **parameter locks**. Every timing and lock behaviour is verified against
 expected values by `make -C host test`, not trusted.
 
-Next: pattern chaining, the MIDI clock PLL, and the KiCad schematic — all still board-free.
+**MIDI clock recovery done.** PI loop with a fast acquisition phase, outlier rejection, and a
+Tight/Smooth tradeoff exposed as a user setting. Locked to a 90 BPM master, the sequencer holds
+step spacing to **1 sample (0.02 ms)**; under ±1 ms source jitter, Smooth keeps the tempo
+estimate inside **0.06 BPM**.
+
+Next: pattern chaining, the UI state machine, and the KiCad schematic — all still board-free.

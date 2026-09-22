@@ -46,5 +46,13 @@ locktest: $(LOCKTEST)
 	$(LOCKTEST)
 
 .PHONY: test
-test: seqtest locktest
+test: seqtest locktest clocktest
 	@$(BUILD_DIR)/render --selftest
+
+CLOCKTEST := $(BUILD_DIR)/clocktest
+$(CLOCKTEST): clocktest.cpp $(wildcard ../src/seq/*.h) | $(BUILD_DIR)
+	$(CXX) $(CXXFLAGS) clocktest.cpp -o $@
+
+.PHONY: clocktest
+clocktest: $(CLOCKTEST)
+	$(CLOCKTEST)

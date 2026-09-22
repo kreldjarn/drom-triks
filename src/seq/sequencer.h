@@ -61,6 +61,31 @@ class Sequencer
     void Stop() { playing_ = false; }
     bool playing() const { return playing_; }
 
+    /// Drive the tick rate from recovered external clock instead of the
+    /// internal tempo. Called once per block while externally synced; the
+    /// rate changes continuously, which is how the PLL closes phase error.
+    void SetTickRateQ16(uint32_t samples_per_tick_q16)
+    {
+        if(samples_per_tick_q16 > 0)
+            samples_per_tick_q16_ = samples_per_tick_q16;
+    }
+
+    /// MIDI Song Position Pointer. Its unit is the MIDI beat — a 16th note —
+    /// so a DAW scrubbing the timeline lands us on the right step.
+    void SeekToTick(uint64_t tick)
+    {
+        tick_         = tick;
+        pos_q16_      = 0;
+        tick_pending_ = true;
+        for(int t = 0; t < kNumTracks; ++t)
+            ratchet_[t] = Ratchet{};
+    }
+
+    void SeekToMidiBeat(uint32_t midi_beats)
+    {
+        SeekToTick(static_cast<uint64_t>(midi_beats) * kTicksPerStep);
+    }
+
     /// Absolute tick since Start(), for MIDI clock and display.
     uint64_t tick() const { return tick_; }
 
