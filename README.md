@@ -20,6 +20,7 @@ trigger and audio-return paths an analog daughterboard will need.
 | [docs/04-development-plan.md](docs/04-development-plan.md) | Phased build plan, milestones, risk register |
 | [docs/05-analog-expansion.md](docs/05-analog-expansion.md) | Hybrid architectures and what v1 must reserve |
 | [docs/06-midi.md](docs/06-midi.md) | Transports, routing matrix, message map, clock recovery, SysEx |
+| [docs/07-test-equipment.md](docs/07-test-equipment.md) | What to buy, when — and why the scope comes last |
 
 ## Design targets
 
