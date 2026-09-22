@@ -191,9 +191,23 @@ step*. It checks the neighbouring positions too — and must de-duplicate, since
 its probability) up to three times per tick.
 
 **Parameter locks** are the feature worth building the data model around. Hold a step key, turn
-a pot, and that pot's value is recorded for that step only. The engine applies locks on trigger
-and restores the pattern value after. Four lock slots per step is plenty in practice and keeps
-`Step` at a cache-friendly 18 bytes.
+a pot, and that pot's value is recorded for that step only. Four lock slots per step is plenty in
+practice and keeps `Step` at a cache-friendly 18 bytes.
+
+The mechanism lives in `VoiceSlot`, which owns the **base** value of every parameter — what the
+knob says — separately from what the voice currently holds:
+
+1. On trigger, **restore first**: any parameter the *previous* step locked is written back to its
+   base. This is what stops a lock leaking into every later step, which is the bug that makes a
+   p-lock feel like it permanently moved the knob.
+2. Then apply this step's locks and fire.
+
+Only previously-locked parameters are touched, so an unlocked step costs zero parameter writes —
+worth having when this runs per trigger inside the audio callback.
+
+One subtlety: a knob moved *while* a lock is held must update the base without disturbing the
+locked value, and the restore must then land on the **new** base. Otherwise the knob appears dead
+until the next unlocked step, and then jumps back to where it used to be.
 
 ## 7. UI state machine
 

@@ -54,7 +54,7 @@ afplay host/build/out.wav
 host/build/render out.wav --solo 4    # one voice alone, for tuning by ear
 host/build/render out.wav --trace     # exact sample each step fires on
 host/build/render --selftest          # voices must be silent until triggered
-make -C host seqtest                  # micro-timing, swing, ratchets, polymeter
+make -C host test                     # sequencer, locks, and voice self-test
 ```
 
 Macro values live at the top of `host/render.cpp` — that's where voice tuning happens.
@@ -74,6 +74,7 @@ decision.
 
 **Phase 3 core complete.** Sample-accurate 96 PPQN sequencer with **micro-timing** (±23 ticks,
 ~5 ms per tick at 120 BPM), swing, probability, ratchets, polymeter and four playback
-directions. Every timing feature is verified in samples by `make -C host seqtest`, not trusted.
+directions, and **parameter locks**. Every timing and lock behaviour is verified against
+expected values by `make -C host test`, not trusted.
 
-Next: parameter locks, pattern chaining, and the MIDI clock PLL — all still board-free.
+Next: pattern chaining, the MIDI clock PLL, and the KiCad schematic — all still board-free.

@@ -1,5 +1,6 @@
 #pragma once
 #include <cstdint>
+#include "../engine/voice.h"
 
 // Pattern data model. Plain data, no behaviour — the sequencer interprets it.
 // Kept free of libDaisy so it builds on the host (see CLAUDE.md).
@@ -15,19 +16,12 @@ inline constexpr int kTicksPerStep = kPpqn / 4;
 
 inline constexpr int kMaxSteps  = 64;
 inline constexpr int kNumTracks = 8;
-inline constexpr int kMaxLocks  = 4;
 
 /// Micro-timing is capped at just under one step in each direction. Beyond
 /// that "which step is this" stops being answerable — a step pushed a full
 /// step late is indistinguishable from the next step early, and the UI would
 /// have no honest way to draw it.
 inline constexpr int kMicroRange = kTicksPerStep - 1; // +/-23
-
-struct ParamLock
-{
-    uint8_t  param_id = 0;
-    uint16_t value    = 0;
-};
 
 enum StepFlags : uint8_t
 {

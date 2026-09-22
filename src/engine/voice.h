@@ -22,6 +22,19 @@ enum class ParamId : uint8_t
     Count
 };
 
+/// A per-step parameter override. Value is 0..65535 mapping to the same 0..1
+/// range SetParam takes — 16 bits so a lock is indistinguishable from a knob
+/// position, and three bytes so a Step stays cache-friendly.
+struct ParamLock
+{
+    uint8_t  param_id = 0;
+    uint16_t value    = 0;
+
+    float as_float() const { return value / 65535.f; }
+};
+
+inline constexpr int kMaxLocks = 4;
+
 /// The seam. Sample playback and analog voices implement this same interface,
 /// so they become additions rather than rewrites of the sequencer, mixer and
 /// UI. Defined before any concrete voice, deliberately.
@@ -55,19 +68,44 @@ class VoiceSlot
         voice_ = voice;
         voice_->Init(sample_rate);
         delay_ = -1;
+        for(int i = 0; i < static_cast<int>(ParamId::Count); ++i)
+            base_[i] = 0.5f;
     }
 
-    /// delay_samples may exceed the current block; it simply counts down.
-    void Schedule(int32_t delay_samples, float velocity)
+    /// The pattern-level value for a parameter — what the knob says. Locks
+    /// override this for one step and then it is restored.
+    void SetBase(ParamId id, float value)
     {
-        delay_    = delay_samples;
-        velocity_ = velocity;
+        base_[static_cast<int>(id)] = value;
+        // Only push through if this parameter is not currently locked, or the
+        // knob move would be overwritten by the restore and appear to do
+        // nothing until the next unlocked step.
+        if((locked_mask_ & (1u << static_cast<int>(id))) == 0)
+            voice_->SetParam(id, value);
+    }
+
+    float base(ParamId id) const { return base_[static_cast<int>(id)]; }
+
+    /// delay_samples may exceed the current block; it simply counts down.
+    /// `locks` are applied at the moment the voice fires, not at schedule time.
+    void Schedule(int32_t   delay_samples,
+                  float     velocity,
+                  const ParamLock *locks = nullptr,
+                  uint8_t   lock_count   = 0)
+    {
+        delay_      = delay_samples;
+        velocity_   = velocity;
+        locks_      = locks;
+        lock_count_ = lock_count;
     }
 
     float Process()
     {
         if(delay_ == 0)
+        {
+            ApplyLocks();
             voice_->Trigger(velocity_);
+        }
         if(delay_ >= 0)
             --delay_;
         return voice_->Process();
@@ -76,9 +114,39 @@ class VoiceSlot
     IVoice *voice() { return voice_; }
 
   private:
-    IVoice *voice_    = nullptr;
-    int32_t delay_    = -1;
-    float   velocity_ = 0.f;
+    /// Restore whatever the previous step locked, then apply this step's locks.
+    ///
+    /// Restoring first is what stops a lock leaking into every later step —
+    /// the bug that makes a p-lock feel like it permanently moved the knob.
+    /// Only previously-locked parameters are touched, so an unlocked step
+    /// costs nothing.
+    void ApplyLocks()
+    {
+        if(locked_mask_)
+        {
+            for(int i = 0; i < static_cast<int>(ParamId::Count); ++i)
+                if(locked_mask_ & (1u << i))
+                    voice_->SetParam(static_cast<ParamId>(i), base_[i]);
+            locked_mask_ = 0;
+        }
+
+        for(uint8_t i = 0; i < lock_count_ && locks_; ++i)
+        {
+            const int id = locks_[i].param_id;
+            if(id >= static_cast<int>(ParamId::Count))
+                continue;
+            voice_->SetParam(static_cast<ParamId>(id), locks_[i].as_float());
+            locked_mask_ |= (1u << id);
+        }
+    }
+
+    IVoice          *voice_    = nullptr;
+    int32_t          delay_    = -1;
+    float            velocity_ = 0.f;
+    const ParamLock *locks_      = nullptr;
+    uint8_t          lock_count_ = 0;
+    uint8_t          locked_mask_ = 0;
+    float            base_[static_cast<int>(ParamId::Count)] = {};
 };
 
 /// Shared drive + level tail, since DaisySP's drum models have neither and all

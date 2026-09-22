@@ -36,3 +36,15 @@ $(SEQTEST): seqtest.cpp $(wildcard ../src/seq/*.h) | $(BUILD_DIR)
 .PHONY: seqtest
 seqtest: $(SEQTEST)
 	$(SEQTEST)
+
+LOCKTEST := $(BUILD_DIR)/locktest
+$(LOCKTEST): locktest.cpp $(wildcard ../src/seq/*.h) $(wildcard ../src/engine/*.h) | $(BUILD_DIR)
+	$(CXX) $(CXXFLAGS) locktest.cpp -o $@
+
+.PHONY: locktest
+locktest: $(LOCKTEST)
+	$(LOCKTEST)
+
+.PHONY: test
+test: seqtest locktest
+	@$(BUILD_DIR)/render --selftest

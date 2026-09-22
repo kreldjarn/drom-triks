@@ -34,13 +34,20 @@ enum TrackId { BD = 0, SD, CH, OH, LT, CP, RS, FM };
 
 const char *kNames[kNumTracks] = {"BD", "SD", "CH", "OH", "LT", "CP", "RS", "FM"};
 
+struct Lk
+{
+    ParamId id;
+    float   value; ///< 0..1, same range the knobs use
+};
+
 /// velocity 0 = rest. micro is in ticks at 96 PPQN: 24 ticks is one step, so
 /// a few ticks is the few-milliseconds nudge that makes a groove sit.
 struct Hit
 {
-    int  step;
-    int  velocity;
-    int  micro;
+    int             step;
+    int             velocity;
+    int             micro;
+    std::vector<Lk> locks = {};
 };
 
 struct TrackDef
@@ -63,7 +70,14 @@ const std::vector<TrackDef> kSong = {
     {CP, 16, {{4, 110, +3}}},
     // A 7-step rim against everything else's 16: polymeter for free.
     {RS, 7, {{3, 70, 0}}},
-    {FM, 16, {{13, 90, 0}}},
+    // Parameter locks doing the thing they exist for: one FM voice playing a
+    // melodic line, because TUNE is locked per step. Without locks this needs
+    // four tracks; with them it is one track and four numbers.
+    {FM, 16, {{1,  85, 0, {{ParamId::Tune, 0.18f}, {ParamId::Decay, 0.18f}}},
+              {5,  75, 0, {{ParamId::Tune, 0.30f}, {ParamId::Decay, 0.14f}}},
+              {9,  85, 0, {{ParamId::Tune, 0.24f}, {ParamId::Decay, 0.18f}}},
+              {13, 95, 0, {{ParamId::Tune, 0.42f}, {ParamId::Decay, 0.30f},
+                           {ParamId::Snap,  0.75f}}}}},
 };
 
 Pattern BuildPattern()
@@ -91,6 +105,17 @@ Pattern BuildPattern()
             s.micro      = static_cast<int8_t>(h.micro);
             s.ratchet    = 1;
             s.probability = 100;
+
+            s.lock_count = 0;
+            for(const Lk &l : h.locks)
+            {
+                if(s.lock_count >= kMaxLocks)
+                    break;
+                s.locks[s.lock_count].param_id = static_cast<uint8_t>(l.id);
+                s.locks[s.lock_count].value
+                    = static_cast<uint16_t>(l.value * 65535.f + 0.5f);
+                ++s.lock_count;
+            }
         }
     }
     return p;
@@ -149,7 +174,10 @@ int main(int argc, char **argv)
     for(int i = 0; i < kNumTracks; ++i)
         slots[i].Init(voices[i], kSampleRate);
 
-    auto set = [&](int t, ParamId p, float v) { voices[t]->SetParam(p, v); };
+    // Through the slot, not the voice: the slot owns the base value a lock
+    // restores to. Writing the voice directly would make locks restore to
+    // whatever was set at Init.
+    auto set = [&](int t, ParamId p, float v) { slots[t].SetBase(p, v); };
     set(BD, ParamId::Tune, 0.20f); set(BD, ParamId::Decay, 0.65f);
     set(BD, ParamId::Tone, 0.35f); set(BD, ParamId::Snap,  0.55f);
     set(BD, ParamId::Drive, 0.30f); set(BD, ParamId::Level, 0.90f);
@@ -205,13 +233,16 @@ int main(int argc, char **argv)
             const Sequencer::Event &ev = events[e];
             if(solo >= 0 && ev.track != solo)
                 continue;
-            slots[ev.track].Schedule(ev.offset, ev.velocity);
+            slots[ev.track].Schedule(ev.offset, ev.velocity,
+                                     ev.step ? ev.step->locks : nullptr,
+                                     ev.step ? ev.step->lock_count : 0);
             if(trace)
             {
                 const long abs = static_cast<long>(b) * kBlock + ev.offset;
-                std::printf("%8ld  %-3s vel %.2f  micro %+3d\n",
+                std::printf("%8ld  %-3s vel %.2f  micro %+3d  locks %d\n",
                             abs, kNames[ev.track], ev.velocity,
-                            ev.step ? ev.step->micro : 0);
+                            ev.step ? ev.step->micro : 0,
+                            ev.step ? ev.step->lock_count : 0);
             }
         }
 
