@@ -90,4 +90,10 @@ headless, so the interaction model is verified before a panel exists.
 **Patch format done.** A patch is a `Pattern` plus a `Kit`, saved with a versioned header so a
 firmware change rejects stale flash rather than reinterpreting it.
 
-Next: pattern chaining, the LED/display layer, and the KiCad schematic — all still board-free.
+**Integration done.** A `Machine` owns the patch, voices, sequencer and clock, and is the sole
+writer of all of it. The UI emits `Command`s into a lock-free SPSC queue drained at the top of
+each audio block, and reads back a small struct of relaxed atomics — the threading model from
+[docs/02-firmware.md §4](docs/02-firmware.md#4-threading-model), implemented and tested with a
+real two-thread producer/consumer run.
+
+Next: pattern chaining, the LED/display layer, and master FX — all still board-free.

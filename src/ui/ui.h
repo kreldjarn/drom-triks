@@ -1,7 +1,7 @@
 #pragma once
 #include <cmath>
 #include <cstdint>
-#include "../io/patch.h"
+#include "../machine.h"
 
 namespace drom {
 
@@ -9,8 +9,13 @@ inline constexpr int kNumPots      = 6;
 inline constexpr int kNumStepKeys  = 16;
 
 /// Panel state machine. Pure logic: it takes debounced key edges and pot
-/// positions, and mutates the patch. No hardware, no drawing — which is what
-/// lets the whole interaction model be tested headless, before a panel exists.
+/// positions and emits Commands. No hardware, no drawing — which is what lets
+/// the whole interaction model be tested headless, before a panel exists.
+///
+/// It never writes the patch. The audio side is the sole writer of pattern,
+/// voice and sequencer state, which is what lets that side run without a
+/// single lock. The UI reads the patch only to draw, where a stale or torn
+/// field costs at worst one frame of wrong brightness.
 ///
 /// SHIFT is a held modifier rather than a latched mode, so there is no state
 /// to get stuck in.
@@ -23,9 +28,9 @@ class Ui
         Mute,     ///< track keys mute/unmute instead of selecting
     };
 
-    void Init(Patch *patch)
+    void Init(Machine *machine)
     {
-        patch_ = patch;
+        machine_ = machine;
         mode_  = Mode::Play;
         selected_track_ = 0;
         held_step_      = -1;
@@ -51,7 +56,11 @@ class Ui
             return;
         if(mode_ == Mode::Mute)
         {
-            patch_->pattern.tracks[track].muted = !patch_->pattern.tracks[track].muted;
+            Command c;
+            c.type  = Command::Type::SetTrackMute;
+            c.track = static_cast<uint8_t>(track);
+            c.value = track_muted(track) ? 0.f : 1.f;
+            machine_->Push(c);
             return;
         }
         if(track != selected_track_)
@@ -65,7 +74,7 @@ class Ui
 
     void StepPress(int step)
     {
-        if(step < 0 || step >= kNumStepKeys || !patch_)
+        if(step < 0 || step >= kNumStepKeys || !machine_)
             return;
         held_step_ = step;
 
@@ -87,7 +96,7 @@ class Ui
     /// Raw pot position, 0..1, straight from the ADC.
     void PotMove(int pot, float raw)
     {
-        if(pot < 0 || pot >= kNumPots || !patch_)
+        if(pot < 0 || pot >= kNumPots || !machine_)
             return;
 
         const ParamId id     = static_cast<ParamId>(pot);
@@ -111,15 +120,21 @@ class Ui
         if(!caught_[pot])
             return;
 
+        Command c;
+        c.track = static_cast<uint8_t>(selected_track_);
+        c.param = static_cast<uint8_t>(pot);
+        c.value = raw;
         if(held_step_ >= 0)
         {
-            WriteLock(held_step_, id, raw);
+            c.type = Command::Type::SetStepLock;
+            c.step = static_cast<uint8_t>(held_step_);
             wrote_lock_while_held_ = true;
         }
         else
         {
-            patch_->kit.params[selected_track_][pot] = raw;
+            c.type = Command::Type::SetKitParam;
         }
+        machine_->Push(c);
     }
 
     // ---- state, for the display and LEDs -----------------------------------
@@ -144,20 +159,23 @@ class Ui
 
     bool track_muted(int track) const
     {
-        return track >= 0 && track < kNumTracks && patch_->pattern.tracks[track].muted;
+        return track >= 0 && track < kNumTracks
+               && machine_->patch().pattern.tracks[track].muted;
     }
 
   private:
     static constexpr float kCatchTolerance = 0.02f;
 
-    bool Valid(int step) const { return patch_ && step >= 0 && step < kNumStepKeys; }
+    bool Valid(int step) const { return machine_ && step >= 0 && step < kNumStepKeys; }
 
-    const Track &CurrentTrack() const { return patch_->pattern.tracks[selected_track_]; }
-    Track       &CurrentTrack() { return patch_->pattern.tracks[selected_track_]; }
+    const Track &CurrentTrack() const
+    {
+        return machine_->patch().pattern.tracks[selected_track_];
+    }
 
     float StoredValue(ParamId id) const
     {
-        return patch_->kit.params[selected_track_][static_cast<int>(id)];
+        return machine_->patch().kit.params[selected_track_][static_cast<int>(id)];
     }
 
     void ReleaseAllPots()
@@ -168,50 +186,15 @@ class Ui
 
     void ToggleStep(int step)
     {
-        Step &s = CurrentTrack().steps[step];
-        if(s.active())
-        {
-            s.flags &= static_cast<uint8_t>(~kStepActive);
-            // Clearing the step clears its locks too: a lock on an inactive
-            // step is invisible state that surprises you when it comes back.
-            s.lock_count = 0;
-        }
-        else
-        {
-            s.flags |= kStepActive;
-        }
+        Command c;
+        c.type  = Command::Type::ToggleStep;
+        c.track = static_cast<uint8_t>(selected_track_);
+        c.step  = static_cast<uint8_t>(step);
+        machine_->Push(c);
     }
 
-    void WriteLock(int step, ParamId id, float value)
-    {
-        Step &s = CurrentTrack().steps[step];
-
-        // Locking an inactive step activates it — otherwise the knob appears
-        // to do nothing and you have to guess that the step needed enabling.
-        s.flags |= kStepActive;
-
-        const uint8_t  pid = static_cast<uint8_t>(id);
-        const uint16_t v   = static_cast<uint16_t>(value * 65535.f + 0.5f);
-
-        for(uint8_t i = 0; i < s.lock_count; ++i)
-            if(s.locks[i].param_id == pid)
-            {
-                s.locks[i].value = v;
-                return;
-            }
-
-        if(s.lock_count < kMaxLocks)
-        {
-            s.locks[s.lock_count].param_id = pid;
-            s.locks[s.lock_count].value    = v;
-            ++s.lock_count;
-        }
-        // Past kMaxLocks the write is dropped. The UI should say so rather
-        // than silently ignoring the knob.
-    }
-
-    Patch *patch_ = nullptr;
-    Mode   mode_  = Mode::Play;
+    Machine *machine_ = nullptr;
+    Mode     mode_    = Mode::Play;
     int    selected_track_ = 0;
     int    held_step_      = -1;
     bool   shift_          = false;

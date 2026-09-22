@@ -49,6 +49,11 @@ PB14/PB15, so it cannot move to other pins). Don't spend them without saying so.
 **Voices go through `IVoice`.** That interface is what makes sample playback and analog voices
 later additions rather than rewrites of the sequencer, mixer and UI. Don't bypass it.
 
+**`Machine` is ~15.5 kB — never a stack local.** It holds the patch (11.2 kB) plus voices and the
+command queue. Declaring one as a local would overflow a typical embedded main stack. Hold it
+statically or as a member of something static, on the host as well, so the tests exercise the
+same shape the firmware uses.
+
 **`src/engine/` must not include libDaisy.** DaisySP only. That constraint is what lets the same
 engine code build natively (`make -C host`) and be listened to without a board, which is how
 Phases 2–3 get developed. One libDaisy include anywhere under `src/engine/` breaks the host
@@ -74,5 +79,8 @@ needs that operator specifically.
   naming a specific model.
 - Don't commit or push unless asked.
 - `build/` and `lib/*/build/` are gitignored — never commit build artifacts.
+- ThreadSanitizer is **broken on this machine** — even a trivial threaded program segfaults under
+  it (Apple clang / macOS 26). The SPSC queue's correctness rests on its functional concurrency
+  test and on review of the acquire/release pairs, not on a race detector.
 - `ruff.toml` excludes `lib/`; without it a pre-commit `ruff check` reports thousands of
   findings from vendored CMSIS Python tooling that we don't own.

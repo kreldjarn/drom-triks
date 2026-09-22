@@ -24,13 +24,12 @@ void Check(bool ok, const char *what)
         ++failures;
 }
 
-Patch MakePatch()
+/// The UI emits commands; only the audio side applies them. Tests therefore
+/// have to pump the machine, which is the real path and worth exercising.
+void Pump(Machine &m)
 {
-    Patch p;
-    InitPatch(p);
-    for(auto &t : p.pattern.tracks)
-        t.length = 16;
-    return p;
+    float buf[32];
+    m.Process(buf, 32);
 }
 
 } // namespace
@@ -39,7 +38,8 @@ int main()
 {
     std::printf("patch format:\n");
     {
-        Patch p = MakePatch();
+        Patch p;
+        InitPatch(p);
         Check(ValidatePatch(p), "a fresh patch validates");
 
         // Round trip through raw bytes, which is what QSPI persistence does.
@@ -63,40 +63,41 @@ int main()
 
     std::printf("\nstep editing:\n");
     {
-        Patch p = MakePatch();
-        Ui ui; ui.Init(&p);
+        static Machine m; m.Init(48000.f);
+        Ui ui; ui.Init(&m);
 
         Check(!ui.step_active(3), "step starts inactive");
-        ui.StepPress(3); ui.StepRelease(3);
+        ui.StepPress(3); ui.StepRelease(3); Pump(m);
         Check(ui.step_active(3), "press+release toggles it on");
-        ui.StepPress(3); ui.StepRelease(3);
+        ui.StepPress(3); ui.StepRelease(3); Pump(m);
         Check(!ui.step_active(3), "again toggles it off");
     }
 
     std::printf("\nsoft takeover (six knobs, eight voices):\n");
     {
-        Patch p = MakePatch();
-        p.kit.params[0][0] = 0.20f;   // track 0 TUNE
-        p.kit.params[1][0] = 0.80f;   // track 1 TUNE
-        Ui ui; ui.Init(&p);
+        static Machine m; m.Init(48000.f);
+        m.mutable_patch().kit.params[0][0] = 0.20f;   // track 0 TUNE
+        m.mutable_patch().kit.params[1][0] = 0.80f;   // track 1 TUNE
+        Ui ui; ui.Init(&m);
+        const Patch &p = m.patch();
 
         // Knob physically at 0.20, matching track 0.
-        ui.PotMove(0, 0.20f);
+        ui.PotMove(0, 0.20f); Pump(m);
         Check(ui.pot_caught(0), "knob catches when it matches the stored value");
-        ui.PotMove(0, 0.30f);
+        ui.PotMove(0, 0.30f); Pump(m);
         Check(std::fabs(p.kit.params[0][0] - 0.30f) < 1e-5f, "and then follows the knob");
 
         ui.TrackPress(1);
         Check(!ui.pot_caught(0), "changing track releases every pot");
 
         // Knob is still at 0.30; track 1 holds 0.80. Moving below must not grab.
-        ui.PotMove(0, 0.35f);
+        ui.PotMove(0, 0.35f); Pump(m);
         Check(std::fabs(p.kit.params[1][0] - 0.80f) < 1e-5f,
               "moving the knob below the stored value changes nothing");
-        ui.PotMove(0, 0.60f);
+        ui.PotMove(0, 0.60f); Pump(m);
         Check(std::fabs(p.kit.params[1][0] - 0.80f) < 1e-5f, "still nothing at 0.60");
 
-        ui.PotMove(0, 0.85f);   // crosses 0.80
+        ui.PotMove(0, 0.85f); Pump(m);   // crosses 0.80
         Check(ui.pot_caught(0), "catches on crossing the stored value");
         Check(std::fabs(p.kit.params[1][0] - 0.85f) < 1e-5f, "and takes over from there");
 
@@ -106,14 +107,15 @@ int main()
 
     std::printf("\nparameter locks from the panel:\n");
     {
-        Patch p = MakePatch();
-        p.kit.params[0][0] = 0.50f;
-        Ui ui; ui.Init(&p);
-        ui.PotMove(0, 0.50f);            // catch the pot
+        static Machine m; m.Init(48000.f);
+        m.mutable_patch().kit.params[0][0] = 0.50f;
+        Ui ui; ui.Init(&m);
+        const Patch &p = m.patch();
+        ui.PotMove(0, 0.50f); Pump(m);   // catch the pot
 
         ui.StepPress(4);
         ui.PotMove(0, 0.90f);            // hold step + turn knob
-        ui.StepRelease(4);
+        ui.StepRelease(4); Pump(m);
 
         const Step &s = p.pattern.tracks[0].steps[4];
         Check(s.lock_count == 1, "holding a step and turning a pot writes one lock");
@@ -126,16 +128,16 @@ int main()
         Check(s.active(), "releasing after a lock does not toggle the step off");
 
         // Same param again should update in place, not append.
-        ui.StepPress(4); ui.PotMove(0, 0.10f); ui.StepRelease(4);
+        ui.StepPress(4); ui.PotMove(0, 0.10f); ui.StepRelease(4); Pump(m);
         Check(p.pattern.tracks[0].steps[4].lock_count == 1,
               "re-locking the same parameter updates in place");
 
         // A different param appends.
-        ui.StepPress(4); ui.PotMove(1, 0.5f); ui.PotMove(1, 0.7f); ui.StepRelease(4);
+        ui.StepPress(4); ui.PotMove(1, 0.5f); ui.PotMove(1, 0.7f); ui.StepRelease(4); Pump(m);
         Check(p.pattern.tracks[0].steps[4].lock_count == 2, "a second parameter appends");
 
         // Clearing the step clears its locks.
-        ui.StepPress(4); ui.StepRelease(4);   // toggles off
+        ui.StepPress(4); ui.StepRelease(4); Pump(m);   // toggles off
         Check(!p.pattern.tracks[0].steps[4].active(), "step toggled off");
         Check(p.pattern.tracks[0].steps[4].lock_count == 0,
               "clearing a step clears its locks rather than hiding them");
@@ -143,16 +145,16 @@ int main()
 
     std::printf("\nmute mode:\n");
     {
-        Patch p = MakePatch();
-        Ui ui; ui.Init(&p);
+        static Machine m; m.Init(48000.f);
+        Ui ui; ui.Init(&m);
         ui.TrackPress(3);
         Check(ui.selected_track() == 3, "track keys select in Play mode");
 
         ui.SetMode(Ui::Mode::Mute);
-        ui.TrackPress(3);
+        ui.TrackPress(3); Pump(m);
         Check(ui.track_muted(3), "track keys mute in Mute mode");
         Check(ui.selected_track() == 3, "and do not change the selection");
-        ui.TrackPress(3);
+        ui.TrackPress(3); Pump(m);
         Check(!ui.track_muted(3), "pressing again unmutes");
     }
 
