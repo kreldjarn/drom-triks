@@ -53,7 +53,8 @@ PCB, so it must be settled here.
 - Pattern data model, 8 tracks × 64 steps
 - Play/stop/tempo, swing, per-track length and speed (polymeter — one byte, large musical payoff)
 - Probability, ratchets, micro-timing
-- MIDI clock in/out, sync source priority
+- MIDI clock in/out with **interrupt timestamping + PLL recovery**, sync source priority
+  ([06-midi.md §6](06-midi.md#6-clock-and-sync)) — build this with the clock, not after it
 - SPSC command queue between UI and audio contexts
 
 **Done when:** it plays a pattern, locks to external MIDI clock, and the timing is tight enough
@@ -70,6 +71,8 @@ The phase that always takes longer than planned, because this is the actual inst
 - OLED pages that explain rather than gate
 - Live record with optional quantise
 - Mutes, pattern chaining
+- Full MIDI message map, both note modes, routing matrix, MIDI learn
+  ([06-midi.md](06-midi.md)) — it binds to the UI, so it belongs here
 
 **Done when:** you can write a pattern from scratch without looking at the screen, and you catch
 yourself jamming instead of testing.
@@ -101,6 +104,7 @@ for it rather than being disappointed by it.
 - Per-voice FX sends
 - Pot calibration, factory reset, firmware version display
 - Song mode / pattern chaining
+- SysEx pattern/kit dump and restore ([06-midi.md §8](06-midi.md#8-sysex))
 
 **Done when:** you can power-cycle it and lose nothing.
 
@@ -116,6 +120,8 @@ Now that the instrument works, pick whichever of these you actually want. They'r
 - **Individual outs.** PCM1681 8-channel I2S DAC + six jacks
 - **CV/gate and analog clock.** The eight triggers from the 74HC595 are already there if you
   populated it in Phase 5
+- **USB MIDI host.** Play it from a controller keyboard with no computer. Firmware-only *if*
+  D29/D30 were left free in Phase 5; a respin otherwise
 - **Enclosure v2.** Aluminium panel, now that you know you won't be moving a knob 2 mm left
 
 ## Risk register
@@ -130,6 +136,8 @@ Now that the instrument works, pick whichever of these you actually want. They'r
 | No `IVoice` seam | Samples/analog become rewrites | Define it in Phase 2, before the first voice |
 | QSPI write faults | Data loss on save | `BOOT_SRAM` validated in Phase 0 |
 | Analog expansion needs ±12 V | Power respin | Barrel jack footprint in v1 ($1.50) |
+| External clock jitter imported into groove | Sounds loose, blamed on the sequencer | Interrupt timestamping + PLL, built in Phase 3 |
+| D29/D30 assigned to other I/O | USB MIDI host needs a respin | Reserve them in the Phase 5 pin map |
 
 ## Sequencing summary
 

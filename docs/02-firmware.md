@@ -249,11 +249,14 @@ you do it from the wrong context.
 
 ## 9. MIDI
 
-- **In**: notes trigger voices (one note per track, GM drum map by default); CC maps to macro
-  params; clock/start/stop/continue for external sync.
-- **Out**: notes mirror the sequencer so the machine can drive other gear; clock at 24 PPQN.
-- **Sync priority**: external clock when present, internal otherwise, with a UI indicator —
-  silently switching sync sources is a debugging nightmare on stage.
+Full implementation — three simultaneous transports (DIN in/out/thru, USB device, optional USB
+host), a routing matrix that makes the machine a usable MIDI hub, the complete channel-voice and
+realtime message set, MIDI learn, and SysEx pattern backup.
 
-USB MIDI via libDaisy's `MidiUsbHandler` comes almost free alongside the UART path and makes
-DAW integration trivial. Wire both from the start.
+The part that interacts with this document is **clock recovery**: incoming clock is timestamped in
+the UART interrupt against the audio sample counter and fed through a PLL, so the sequencer runs
+from a smoothed tempo estimate rather than raw clock edges. Triggering directly off clock bytes
+would import the source's jitter — up to 1 ms from a USB source, which is quantised to USB frames —
+and throw away the sample-accurate timing of §3.
+
+See **[06-midi.md](06-midi.md)** for the full specification.

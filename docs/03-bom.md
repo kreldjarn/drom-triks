@@ -59,10 +59,10 @@ plus 2 × 1 kΩ current-set resistors. Adds $3.50, removes RGB, removes timing r
 
 | Qty | Part | Example P/N | Unit | Ext | Notes |
 | ---: | --- | --- | ---: | ---: | --- |
-| 2 | 3.5 mm TRS jack (MIDI Type A) | PJ-320D | $1.00 | $2.00 | Type A is the current standard |
+| 3 | 3.5 mm TRS jack (MIDI Type A) | PJ-320D | $1.00 | $3.00 | In, Out **and Thru** |
 | 1 | Optoisolator | H11L1 | $1.00 | $1.00 | Schmitt output; no extra buffering needed on input |
-| 1 | Hex inverter/buffer | 74HCT14 | $0.40 | $0.40 | MIDI out drive |
-| — | 220 Ω / 10 Ω / 33 Ω resistors | — | — | $0.50 | |
+| 1 | Hex inverter/buffer | 74HCT14 | $0.40 | $0.40 | 6 gates: 2 for Out, 2 for Thru |
+| — | 220 Ω / 10 Ω / 33 Ω resistors | — | — | $0.70 | |
 
 ## Power and misc
 
@@ -96,12 +96,12 @@ Insurance so that adding analog circuitry later does not require a board respin.
 | LEDs and drivers | $6.10 |
 | Digital glue | $15.60 |
 | Audio output | $10.00 |
-| MIDI | $3.90 |
+| MIDI | $5.10 |
 | Power and misc | $26.70 |
 | Analog expansion reservations | $4.90 |
-| **Total (v1, first unit)** | **≈ $206** |
+| **Total (v1, first unit)** | **≈ $207** |
 | *less one-time tooling (ST-Link, passives assortment, 4 spare PCBs)* | *−$57* |
-| **Marginal cost of a second unit** | **≈ $149** |
+| **Marginal cost of a second unit** | **≈ $150** |
 
 Budget **$250–300 all-in** for the first build. That covers a second PCB spin, which you will
 need, and the parts you'll destroy learning.
@@ -115,7 +115,8 @@ need, and the parts you'll destroy learning.
 | 6 | 1/4" TS jack | $2.00 | $12.00 | Individual outs |
 | 4 | 3.5 mm jack + TL074 conditioning | $2.50 | $10.00 | CV/gate + analog clock in/out |
 | 1 | Analog voice daughterboard (BD + SD + output filter) | ~$60 | $60.00 | PCB, DAC8568 CV DAC, ±12 V DC-DC, discrete voice circuits |
-| | **v2 add-on total** | | **$91.50** | |
+| 1 | USB-A jack + 5 V load switch | $2.50 | $2.50 | USB MIDI host — **costs pins D29/D30**, keep them free in v1 |
+| | **v2 add-on total** | | **$94.00** | |
 
 Leave footprints for the SD socket and the clock jacks on the v1 PCB even if you don't populate
 them. Unpopulated footprints are free; a board respin is $40 and three weeks.

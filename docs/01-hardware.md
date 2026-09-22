@@ -147,8 +147,11 @@ Two gotchas that will cost you an evening each if missed:
 - **OLED**: SSD1309 2.42" 128×64, SPI — **5 pins** (SCK, MOSI, CS, DC, RST). libDaisy's
   `OledDisplay<SSD130x4WireSpiTransport>` drives it directly. The 0.96" SSD1306 is the same
   driver and half the price, but it's too small to read parameter values from playing distance.
-- **MIDI**: UART — **2 pins**. H11L1 optoisolator on input, buffer + 2×220 Ω on output.
-  TRS Type-A jacks (3.5 mm) rather than 5-pin DIN: smaller, and now the standard.
+- **MIDI**: UART — **2 pins**, for **In, Out and Thru**. H11L1 optoisolator on input,
+  74HCT14 buffering Out and Thru (six gates, two each — one chip covers both). TRS Type-A jacks
+  (3.5 mm) rather than 5-pin DIN: smaller, and the standard since 2018. Thru is buffered straight
+  off the opto, so it costs **no MCU pin** and keeps working even if the firmware is wedged.
+  USB MIDI device comes free on the USB-C port. Full spec in [06-midi.md](06-midi.md).
 - **Audio**: stereo line out on the Seed3's codec pins, plus a headphone amp (TPA6132A2)
   on a 3.5 mm jack. Output stage detail pending the schematic check in §1.
 
@@ -162,7 +165,7 @@ Two gotchas that will cost you an evening each if missed:
 | Encoders A/B ×2 | 4 | direct GPIO, switches on the chain |
 | LED data (SPI2) | 2 | MOSI + SCK consumed by the peripheral |
 | OLED (SPI1) | 5 | SCK, MOSI, CS, DC, RST |
-| MIDI UART | 2 | TX, RX |
+| MIDI UART (In/Out/Thru) | 2 | TX, RX — Thru is buffered in hardware, no pin |
 | Trigger outs (74HC595 CS) | 1 | shares the OLED SPI bus |
 | **Subtotal** | **22** | |
 | SD card (SDMMC 4-bit) | 6 | phase 7, for samples |
@@ -170,6 +173,12 @@ Two gotchas that will cost you an evening each if missed:
 
 Three pins spare after the SD card. Use the select lines for the mux rather than ADC-capable
 pins — don't burn a 16-bit ADC channel on a digital select line.
+
+**Keep D29 and D30 unassigned.** USB MIDI host mode — plugging a controller keyboard straight into
+the machine with no computer — needs the OTG HS peripheral, which is hard-wired to PB14/PB15,
+i.e. exactly Daisy pins D29 and D30. Leaving those two free keeps host mode a firmware change
+instead of a respin, and takes the budget to 30 of 31 if you ever enable it. See
+[06-midi.md §1](06-midi.md#1-transports).
 
 ## 4. Power
 
