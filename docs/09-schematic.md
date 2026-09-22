@@ -3,24 +3,22 @@
 Phase 5. Work through this in order — the first step is the one that isn't done yet, and drawing
 before it is settled means redrawing.
 
-## 0. The prerequisite: a pin map
+## 0. The pin map — done
 
-[Hardware §3.6](01-hardware.md#36-pin-budget) has a pin **budget** (28 of 31 used) but not a pin
-**map**. Nothing can be drawn until each function is assigned to a named Daisy pin, and the
-assignment is not free — it's constrained by which STM32 peripheral instance reaches which pin.
+[Hardware §3.6](01-hardware.md#36-pin-map) now carries a complete `Daisy pin → net → peripheral`
+table, derived from libDaisy's peripheral pin tables rather than read off a datasheet. Three
+constraints shaped it, and two overturned earlier assumptions:
 
-The constraints, from libDaisy's own headers:
+- **SPI2 is unusable** — its only SCLK pin (PD3) isn't broken out. The LED chain was assigned to
+  it; it now uses SPI1.
+- **SDMMC 4-bit collides with SPI3**, so the SD card runs 1-bit (still several MB/s against the
+  ~200 kB/s a sample stream needs).
+- **The trigger shift register can't share the display bus** — the 595 shifts in every byte on
+  MOSI, and the display is drawn from the main loop while triggers fire from the audio callback.
+  It has three dedicated pins.
 
-| Constraint | Consequence |
-| --- | --- |
-| **ADC is only on D15–D25 and D28** (aliases A0–A11) | The pot mux's analog input must land in that range. D31/D32 exist only on the Seed2 DFM. |
-| **D29/D30 are PB14/PB15** | Reserved for USB MIDI host ([06-midi.md §1](06-midi.md#1-transports)). Assign nothing to them. |
-| **SPI1/SPI2/SPI3, USART1/UART4/5/7, SDMMC** each reach fixed pins | Two SPI devices (OLED + LED chain) must be on different peripheral instances, or share one bus with separate chip selects. |
-| Mux select lines are digital | Don't spend a 16-bit ADC pin on one. |
-
-**Deliverable:** a table of `Daisy pin → net name → peripheral`, checked against libDaisy so the
-firmware can actually configure it. Worth doing as a spreadsheet and pasting into
-`docs/01-hardware.md` before opening KiCad.
+26 pins assigned, 2 spare (both ADC-capable), 2 reserved for USB MIDI host, 1 consumed by a
+peripheral but left unrouted.
 
 ## 1. Tooling
 

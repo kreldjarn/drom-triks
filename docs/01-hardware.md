@@ -158,30 +158,75 @@ Two gotchas that will cost you an evening each if missed:
 - **Audio**: stereo line out on the Seed3's codec pins, plus a headphone amp (TPA6132A2)
   on a 3.5 mm jack. Output stage detail pending the schematic check in §1.
 
-### 3.6 Pin budget
+### 3.6 Pin map
 
-| Function | Pins | Notes |
-| --- | ---: | --- |
-| Pot mux (CD4051) | 4 | 1 ADC + 3 select |
-| 2nd mux (expansion) | 1 | shares the 3 select lines |
-| Key chain (CD4021 ×4) | 3 | clock, latch, data |
-| Encoders A/B ×2 | 4 | direct GPIO, switches on the chain |
-| LED data (SPI2) | 2 | MOSI + SCK consumed by the peripheral |
-| OLED (SPI1) | 5 | SCK, MOSI, CS, DC, RST |
-| MIDI UART (In/Out/Thru) | 2 | TX, RX — Thru is buffered in hardware, no pin |
-| Trigger outs (74HC595 CS) | 1 | shares the OLED SPI bus |
-| **Subtotal** | **22** | |
-| SD card (SDMMC 4-bit) | 6 | phase 7, for samples |
-| **Total** | **28** | of 31 available |
+Derived from libDaisy's own peripheral tables, not from the datasheet by eye. Three constraints
+did most of the work, and two of them broke earlier assumptions in this document.
 
-Three pins spare after the SD card. Use the select lines for the mux rather than ADC-capable
-pins — don't burn a 16-bit ADC channel on a digital select line.
+**`SPI2` cannot be used.** Its only SCLK pin is PD3, which is not broken out on the Seed
+footprint. An earlier draft put the LED chain on SPI2. The usable instances are **SPI1, SPI3 and
+SPI6**.
 
-**Keep D29 and D30 unassigned.** USB MIDI host mode — plugging a controller keyboard straight into
-the machine with no computer — needs the OTG HS peripheral, which is hard-wired to PB14/PB15,
-i.e. exactly Daisy pins D29 and D30. Leaving those two free keeps host mode a firmware change
-instead of a respin, and takes the budget to 30 of 31 if you ever enable it. See
-[06-midi.md §1](06-midi.md#1-transports).
+**SDMMC 4-bit collides with SPI3.** The SD card's 4-bit lanes are PC8/PC9/PC10/PC11/PC12/PD2,
+and SPI3 needs PC10 for SCLK and PC12 for MOSI. Running the card in **1-bit mode** (PC8, PC12,
+PD2 only) frees three pins. 1-bit SDMMC still moves several MB/s against the ~200 kB/s a stereo
+48 kHz sample stream needs, so nothing is lost.
+
+**The trigger-out shift register cannot share the display's SPI bus.** The 74HC595 shifts in
+every byte that crosses MOSI, and the OLED is drawn from the main loop while triggers fire from
+the audio callback — so an OLED transfer landing between loading the 595 and latching it would
+emit whatever the display happened to be drawing as gate pulses. The 595 gets three dedicated
+pins instead, taken from the lanes the 1-bit SD card freed.
+
+| Daisy | STM32 | Net | Function |
+| --- | --- | --- | --- |
+| D0 | PB12 | `KEY_CLK` | CD4021 chain clock |
+| D1 | PC11 | `TRIG_DATA` | 74HC595 trigger outs |
+| D2 | PC10 | `TRIG_CLK` | |
+| D3 | PC9 | `TRIG_LATCH` | |
+| D4 | PC8 | `SD_D0` | SDMMC 1-bit (phase 7) |
+| D5 | PD2 | `SD_CMD` | |
+| D6 | PC12 | `SD_CLK` | |
+| D7 | PG10 | `KEY_LATCH` | |
+| D8 | PG11 | — | SPI1 SCK: driven by the peripheral, **do not route** (test point only) |
+| D9 | PB4 | `KEY_DATA` | |
+| D10 | PB5 | `LED_DATA` | SPI1 MOSI → 74AHCT125 → SK6812 |
+| D11 | PB8 | `MUX_SEL0` | |
+| D12 | PB9 | `MUX_SEL1` | |
+| D13 | PB6 | `MIDI_TX` | USART1 |
+| D14 | PB7 | `MIDI_RX` | USART1 |
+| **D15** | PC0 · **A0** | `POT_MUX_A` | 6 pots via CD4051 |
+| **D16** | PA3 · **A1** | `MUX2_A` | second CD4051 (expansion) |
+| **D17** | PB1 · **A2** | — | **spare, ADC-capable** |
+| D18 | PA7 · A3 | `DISP_MOSI` | SPI6 MOSI |
+| D19 | PA6 · A4 | `ENC1_B` | |
+| D20 | PC1 · A5 | `ENC2_A` | |
+| D21 | PC4 · A6 | `ENC2_B` | |
+| D22 | PA5 · A7 | `DISP_SCK` | SPI6 SCLK |
+| D23 | PA4 · A8 | `DISP_CS` | |
+| D24 | PA1 · A9 | `DISP_DC` | |
+| D25 | PA0 · A10 | `DISP_RST` | |
+| D26 | PD11 | `MUX_SEL2` | |
+| D27 | PG9 | `ENC1_A` | |
+| **D28** | PA2 · **A11** | — | **spare, ADC-capable** |
+| D29 | PB14 | — | **reserved: USB MIDI host D−** |
+| D30 | PB15 | — | **reserved: USB MIDI host D+** |
+
+**26 assigned, 2 spare, 2 reserved, 1 consumed-but-unrouted.**
+
+Notes on the choices:
+
+- **ADC is only on D15–D25 and D28.** The two analog inputs sit on D15/D16, leaving D17 and D28
+  spare — genuine headroom for a CV input or expression pedal without touching anything else.
+- **LEDs on SPI1, display on SPI6**, deliberately that way round. The SK6812 driver needs only
+  MOSI, so its bus clock is wasted — and SPI1's clock (PG11/D8) is *not* ADC-capable, while
+  SPI6's (PA5/D22) is. Swapping them would throw away an ADC pin for nothing.
+- **Encoders land on ADC-capable pins** because every non-ADC pin is spoken for. That is fine:
+  they are plain GPIO, and 2 of 12 ADC pins remain.
+- **Nothing touches D29/D30.**
+
+Use non-ADC pins for the mux select lines — done above (D11, D12, D26) — rather than burning a
+16-bit ADC channel on a digital select line.
 
 ## 4. Power
 

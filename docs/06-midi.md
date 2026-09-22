@@ -24,7 +24,7 @@ Three, all active at once, all merging into one event stream:
 
 `HOST` mode needs the OTG HS peripheral, which is hard-wired to **PB14/PB15 — Daisy pins D29 and
 D30**. It is not "any 2 spare pins": those two specific pins must be left unassigned, and they're
-otherwise prime GPIO. It also pushes the [pin budget](01-hardware.md#36-pin-budget) from 28 to 30
+otherwise prime GPIO. It also pushes the [pin budget](01-hardware.md#36-pin-map) from 28 to 30
 of 31.
 
 **Recommendation: build v1 with transports 1 and 2, and keep D29/D30 unassigned** so host mode
