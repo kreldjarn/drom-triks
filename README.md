@@ -49,10 +49,14 @@ Full setup, including the toolchain and the bring-up checklist, in
 The voice engine and sequencer have no hardware dependency, so they build and run natively:
 
 ```sh
-make -C host run          # renders host/build/out.wav
+make -C host run                      # renders host/build/out.wav
 afplay host/build/out.wav
-host/build/render out.wav --trace    # exact sample each step fires on
+host/build/render out.wav --solo 4    # one voice alone, for tuning by ear
+host/build/render out.wav --trace     # exact sample each step fires on
+host/build/render --selftest          # voices must be silent until triggered
 ```
+
+Macro values live at the top of `host/render.cpp` — that's where voice tuning happens.
 
 `src/engine/` depends on DaisySP only — never libDaisy — which is what lets the *same* code the
 firmware compiles also run on a laptop. Voices can be tuned against reference records and
@@ -64,6 +68,9 @@ sequencer timing checked sample-by-sample long before a board arrives.
 bring-up program — it blinks, plays a sine, and round-trips QSPI to prove the `BOOT_SRAM`
 decision.
 
-**Phase 2 started.** Four DaisySP-backed voices (BD, SD, CH, OH) behind the `IVoice` seam,
-rendering through the host harness. Measured scheduling error: **0.97 samples (0.02 ms)** worst
-case across 32 steps, against the ±0.67 ms that block-quantised triggering would cost.
+**Phase 2 voices complete.** All eight — BD, SD, CH, OH from DaisySP; tom, clap, rimshot and
+2-op FM built from primitives — behind the `IVoice` seam, rendering through the host harness.
+Measured scheduling error: **0.97 samples (0.02 ms)** worst case across 32 steps, against the
+±0.67 ms that block-quantised triggering would cost.
+
+Next: the sequencer (Phase 3), which is also pure logic and needs no board.

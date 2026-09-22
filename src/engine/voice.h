@@ -97,6 +97,15 @@ class VoiceBase : public IVoice
   protected:
     virtual void OnParam(ParamId, float) {}
 
+    /// Voices that use AdEnv must gate on this.
+    ///
+    /// A freshly Init'd AdEnv does not rest at zero: it starts at 0.0001 and,
+    /// because the idle increment is clamped to +epsilon rather than 0, ramps
+    /// to ~0.49 over the first ~8000 samples before settling. Left ungated
+    /// that is an audible swell out of every voice at power-on. Gating also
+    /// skips the DSP for idle voices, which is most of them most of the time.
+    bool  active_ = false;
+
     float param(ParamId id) const { return params_[static_cast<int>(id)]; }
 
     /// Soft saturation, then output gain. Drive at 0 is unity and clean.

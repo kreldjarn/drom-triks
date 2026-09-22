@@ -17,7 +17,7 @@ CXXFLAGS := -std=c++17 -O2 -Wall $(INCLUDES)
 .PHONY: all clean run
 all: $(TARGET)
 
-$(TARGET): $(SOURCES) ../src/engine/voice.h ../src/engine/voices/drums.h | $(BUILD_DIR)
+$(TARGET): $(SOURCES) ../src/engine/voice.h $(wildcard ../src/engine/voices/*.h) | $(BUILD_DIR)
 	$(CXX) $(CXXFLAGS) $(SOURCES) -o $@
 
 $(BUILD_DIR):
