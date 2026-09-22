@@ -21,7 +21,6 @@ trigger and audio-return paths an analog daughterboard will need.
 | [docs/05-analog-expansion.md](docs/05-analog-expansion.md) | Hybrid architectures and what v1 must reserve |
 | [docs/06-midi.md](docs/06-midi.md) | Transports, routing matrix, message map, clock recovery, SysEx |
 | [docs/07-test-equipment.md](docs/07-test-equipment.md) | What to buy, when — and why the scope comes last |
-| [docs/08-sourcing-sweden.md](docs/08-sourcing-sweden.md) | Vendor links per item, ordered around EU customs |
 
 ## Design targets
 

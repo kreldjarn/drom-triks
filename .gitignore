@@ -12,3 +12,6 @@ build/
 .DS_Store
 .vscode/ipch/
 compile_commands.json
+
+# Personal sourcing notes — kept locally, not published
+docs/08-sourcing-sweden.md
