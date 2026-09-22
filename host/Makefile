@@ -1,0 +1,30 @@
+# Native build of the voice engine + sequencer, for developing and listening to
+# them without a Daisy board. Uses the host compiler, not the ARM toolchain.
+#
+#   make -C host && host/build/render out.wav && afplay out.wav
+
+DAISYSP_DIR := ../lib/DaisySP
+BUILD_DIR   := build
+TARGET      := $(BUILD_DIR)/render
+
+# DaisySP's headers include each other by bare filename, so every source
+# directory has to be on the include path.
+INCLUDES := $(addprefix -I,$(shell find $(DAISYSP_DIR)/Source -type d))
+SOURCES  := render.cpp $(shell find $(DAISYSP_DIR)/Source -name '*.cpp')
+
+CXXFLAGS := -std=c++17 -O2 -Wall $(INCLUDES)
+
+.PHONY: all clean run
+all: $(TARGET)
+
+$(TARGET): $(SOURCES) ../src/engine/voice.h ../src/engine/voices/drums.h | $(BUILD_DIR)
+	$(CXX) $(CXXFLAGS) $(SOURCES) -o $@
+
+$(BUILD_DIR):
+	mkdir -p $(BUILD_DIR)
+
+run: $(TARGET)
+	$(TARGET) $(BUILD_DIR)/out.wav
+
+clean:
+	rm -rf $(BUILD_DIR)

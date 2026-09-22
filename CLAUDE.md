@@ -49,6 +49,11 @@ PB14/PB15, so it cannot move to other pins). Don't spend them without saying so.
 **Voices go through `IVoice`.** That interface is what makes sample playback and analog voices
 later additions rather than rewrites of the sequencer, mixer and UI. Don't bypass it.
 
+**`src/engine/` must not include libDaisy.** DaisySP only. That constraint is what lets the same
+engine code build natively (`make -C host`) and be listened to without a board, which is how
+Phases 2–3 get developed. One libDaisy include anywhere under `src/engine/` breaks the host
+build for everything.
+
 ## Verifying APIs
 
 libDaisy and DaisySP are vendored in `lib/`. Read the headers there rather than recalling an API

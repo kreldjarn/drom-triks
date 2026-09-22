@@ -41,8 +41,10 @@ PCB, so it must be settled here.
 - Four voices from DaisySP (BD, SD, CH, OH) — mostly configuration
 - Four custom voices (LT, CP, RS, FM)
 - Map all six macro params consistently across every voice
-- **Trigger the voices over MIDI from a DAW.** This is the ordering trick that makes the phase
-  work: you get to tune all eight voices against reference records before a sequencer exists
+- **Develop them on the host first.** `make -C host run` renders the real engine to a WAV with no
+  board involved — DaisySP has no hardware dependency. Tune against reference records in a DAW,
+  iterate in seconds, and arrive at hardware with the voices already right
+- **Then trigger over MIDI from a DAW** once a board exists, to play them in real time
 - Profile CPU per voice and record the numbers
 
 **Done when:** all eight voices sound good played from Ableton, and you know your CPU budget.

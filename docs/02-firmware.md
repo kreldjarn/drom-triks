@@ -124,7 +124,7 @@ eight voices are mostly configuration:
 | 1 | BD | `AnalogBassDrum` / `SyntheticBassDrum` (switchable model) |
 | 2 | SD | `AnalogSnareDrum` / `SyntheticSnareDrum` (switchable) |
 | 3 | CH | `HiHat<SquareNoise, LinearVCA>` |
-| 4 | OH | `HiHat<RingModNoise, CymbalVoice>` |
+| 4 | OH | `HiHat<RingModNoise, SwingVCA>` |
 | 5 | LT | custom: sine + pitch envelope + drive (~40 lines) |
 | 6 | CP | custom: 3 retriggered noise bursts through a BPF + reverberant body |
 | 7 | RS | custom: two detuned squares through a BPF, 808-rimshot style |
