@@ -1,77 +1,109 @@
-// Host renderer: runs the real voice engine natively and writes a WAV.
+// Host renderer: the real engine — sequencer and voices — rendered to a WAV.
 //
-// This is how Phases 2 and 3 get built without a board. The engine code under
-// src/engine/ is the same code the firmware compiles; only the audio sink
-// differs — a WAV file here, the codec there. Voices can be tuned against
-// reference records, and sequencer timing inspected sample by sample, months
-// before hardware exists.
+// Same code the firmware compiles; only the audio sink differs. Processing
+// happens in 32-sample blocks exactly as the audio callback will, so timing
+// behaviour here is the timing behaviour on hardware.
 //
-//   make -C host && host/build/render out.wav && afplay out.wav
+//   make -C host run && afplay host/build/out.wav
+//   host/build/render out.wav --solo 2      one voice alone, for tuning
+//   host/build/render out.wav --trace       every event, with its sample
+//   host/build/render --selftest            voices silent until triggered
 
+#include <cmath>
 #include <cstdio>
 #include <cstdlib>
-#include <cmath>
 #include <cstring>
 #include <vector>
 
 #include "../src/engine/voices/drums.h"
 #include "../src/engine/voices/synth.h"
+#include "../src/seq/sequencer.h"
 #include "wav.h"
 
 using namespace drom;
 
 namespace {
 
-constexpr float kSampleRate = 48000.f;
-constexpr int   kSteps      = 16;
-constexpr float kBpm        = 124.f;
-constexpr int   kBars       = 2;
+constexpr float  kSampleRate = 48000.f;
+constexpr size_t kBlock      = 32; // matches the firmware's audio block
+constexpr float  kBpm        = 124.f;
+constexpr int    kBars       = 2;
 
-enum Track
+// Named TrackId, not Track: drom::Track is the pattern's track struct.
+enum TrackId { BD = 0, SD, CH, OH, LT, CP, RS, FM };
+
+const char *kNames[kNumTracks] = {"BD", "SD", "CH", "OH", "LT", "CP", "RS", "FM"};
+
+/// velocity 0 = rest. micro is in ticks at 96 PPQN: 24 ticks is one step, so
+/// a few ticks is the few-milliseconds nudge that makes a groove sit.
+struct Hit
 {
-    BD = 0,
-    SD,
-    CH,
-    OH,
-    LT,
-    CP,
-    RS,
-    FM,
-    kNumTracks
+    int  step;
+    int  velocity;
+    int  micro;
 };
 
-// A plain 16-step pattern, velocities 0 = rest. Deliberately boring: the point
-// is to hear whether the engine is right, not whether the beat is good.
-const float kPattern[kNumTracks][kSteps] = {
-    /* BD */ {1.0f, 0, 0, 0, 0, 0, 0.7f, 0, 0, 0, 1.0f, 0, 0, 0, 0, 0},
-    /* SD */ {0, 0, 0, 0, 1.0f, 0, 0, 0, 0, 0, 0, 0, 1.0f, 0, 0, 0.5f},
-    /* CH */ {0.8f, 0, 0.5f, 0, 0.8f, 0, 0.5f, 0, 0.8f, 0, 0.5f, 0, 0.8f, 0, 0.5f, 0},
-    /* OH */ {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0.7f, 0},
-    /* LT */ {0, 0, 0, 0, 0, 0, 0, 0, 0.8f, 0, 0, 0, 0, 0, 0, 0},
-    /* CP */ {0, 0, 0, 0, 0.9f, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
-    /* RS */ {0, 0, 0, 0.6f, 0, 0, 0, 0.6f, 0, 0, 0, 0.6f, 0, 0, 0, 0},
-    /* FM */ {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0.7f, 0, 0},
+struct TrackDef
+{
+    int              track;
+    int              length;
+    std::vector<Hit> hits;
 };
 
-} // namespace
+// The micro offsets here are the point. The snare drags a little behind the
+// grid, the offbeat hats push slightly ahead of it: the classic "laid back
+// backbeat over an urgent hat" feel, which is unreachable with a plain grid.
+const std::vector<TrackDef> kSong = {
+    {BD, 16, {{0, 110, 0}, {6, 80, 0}, {10, 110, 0}}},
+    {SD, 16, {{4, 115, +3}, {12, 115, +3}, {15, 60, +3}}},
+    {CH, 16, {{0, 95, 0}, {2, 65, -2}, {4, 95, 0}, {6, 65, -2},
+              {8, 95, 0}, {10, 65, -2}, {12, 95, 0}, {14, 65, -2}}},
+    {OH, 16, {{14, 90, 0}}},
+    {LT, 16, {{8, 100, 0}}},
+    {CP, 16, {{4, 110, +3}}},
+    // A 7-step rim against everything else's 16: polymeter for free.
+    {RS, 7, {{3, 70, 0}}},
+    {FM, 16, {{13, 90, 0}}},
+};
 
-namespace {
+Pattern BuildPattern()
+{
+    Pattern p;
+    p.bpm_x10 = static_cast<uint16_t>(kBpm * 10.f);
+    p.swing   = 50;
 
-/// Regression check: a voice that has never been triggered must be silent.
-///
-/// This is not hypothetical — DaisySP's AdEnv swells to ~0.49 over its first
-/// ~8000 idle samples, so every envelope-based voice thumps at power-on unless
-/// it gates on envelope activity. Cheap to check, unpleasant to rediscover
-/// through a speaker.
+    for(auto &t : p.tracks)
+    {
+        t.muted  = true;
+        t.length = 16;
+    }
+
+    for(const auto &def : kSong)
+    {
+        Track &t = p.tracks[def.track];
+        t.muted  = false;
+        t.length = static_cast<uint8_t>(def.length);
+        for(const Hit &h : def.hits)
+        {
+            Step &s      = t.steps[h.step];
+            s.flags      = kStepActive;
+            s.velocity   = static_cast<uint8_t>(h.velocity);
+            s.micro      = static_cast<int8_t>(h.micro);
+            s.ratchet    = 1;
+            s.probability = 100;
+        }
+    }
+    return p;
+}
+
 int SelfTest()
 {
     BassDrum bd; SnareDrum sd; ClosedHat ch; OpenHat oh;
     Tom lt; Clap cp; RimShot rs; FmVoice fm;
     IVoice *voices[] = {&bd, &sd, &ch, &oh, &lt, &cp, &rs, &fm};
-    const char *names[] = {"BD", "SD", "CH", "OH", "LT", "CP", "RS", "FM"};
 
     int failures = 0;
-    for(int v = 0; v < 8; ++v)
+    for(int v = 0; v < kNumTracks; ++v)
     {
         voices[v]->Init(kSampleRate);
         for(int pp = 0; pp < static_cast<int>(ParamId::Count); ++pp)
@@ -79,16 +111,12 @@ int SelfTest()
 
         float peak = 0.f;
         for(int i = 0; i < 48000; ++i)
-        {
-            const float a = std::fabs(voices[v]->Process());
-            if(a > peak)
-                peak = a;
-        }
+            peak = std::fmax(peak, std::fabs(voices[v]->Process()));
+
         const bool ok = peak < 1e-6f;
-        std::printf("  %-3s untriggered peak %.8f  %s\n", names[v], peak,
+        std::printf("  %-3s untriggered peak %.8f  %s\n", kNames[v], peak,
                     ok ? "silent" : "*** DRONES ***");
-        if(!ok)
-            ++failures;
+        failures += ok ? 0 : 1;
     }
     std::printf("%s\n", failures ? "SELFTEST FAILED" : "selftest passed");
     return failures;
@@ -98,40 +126,29 @@ int SelfTest()
 
 int main(int argc, char **argv)
 {
-    for(int i = 1; i < argc; ++i)
-        if(std::strcmp(argv[i], "--selftest") == 0)
-            return SelfTest();
-
-    const char *out   = (argc > 1) ? argv[1] : "drom-triks.wav";
-    // --trace prints the exact sample each step fires on. Audio onset detection
-    // is far too blunt to verify sub-millisecond scheduling; this is exact.
+    const char *out   = "drom-triks.wav";
     bool        trace = false;
-    // --solo N renders one track alone, which is how you actually tune a voice:
-    // in a mix everything sounds fine until it doesn't.
     int         solo  = -1;
+
     for(int i = 1; i < argc; ++i)
     {
-        if(std::strcmp(argv[i], "--trace") == 0)
+        if(std::strcmp(argv[i], "--selftest") == 0)
+            return SelfTest();
+        else if(std::strcmp(argv[i], "--trace") == 0)
             trace = true;
         else if(std::strcmp(argv[i], "--solo") == 0 && i + 1 < argc)
             solo = std::atoi(argv[++i]);
+        else if(argv[i][0] != '-')
+            out = argv[i];
     }
 
-    BassDrum  bd;
-    SnareDrum sd;
-    ClosedHat ch;
-    OpenHat   oh;
-    Tom       lt;
-    Clap      cp;
-    RimShot   rs;
-    FmVoice   fm;
-
-    IVoice *voices[kNumTracks] = {&bd, &sd, &ch, &oh, &lt, &cp, &rs, &fm};
+    BassDrum bd; SnareDrum sd; ClosedHat ch; OpenHat oh;
+    Tom lt; Clap cp; RimShot rs; FmVoice fm;
+    IVoice   *voices[kNumTracks] = {&bd, &sd, &ch, &oh, &lt, &cp, &rs, &fm};
     VoiceSlot slots[kNumTracks];
     for(int i = 0; i < kNumTracks; ++i)
         slots[i].Init(voices[i], kSampleRate);
 
-    // Macro settings. These are the numbers to fiddle with while listening.
     auto set = [&](int t, ParamId p, float v) { voices[t]->SetParam(p, v); };
     set(BD, ParamId::Tune, 0.20f); set(BD, ParamId::Decay, 0.65f);
     set(BD, ParamId::Tone, 0.35f); set(BD, ParamId::Snap,  0.55f);
@@ -143,11 +160,11 @@ int main(int argc, char **argv)
 
     set(CH, ParamId::Tune, 0.55f); set(CH, ParamId::Decay, 0.12f);
     set(CH, ParamId::Tone, 0.70f); set(CH, ParamId::Snap,  0.50f);
-    set(CH, ParamId::Drive, 0.0f); set(CH, ParamId::Level, 0.45f);
+    set(CH, ParamId::Drive, 0.0f); set(CH, ParamId::Level, 0.60f);
 
     set(OH, ParamId::Tune, 0.50f); set(OH, ParamId::Decay, 0.55f);
     set(OH, ParamId::Tone, 0.65f); set(OH, ParamId::Snap,  0.55f);
-    set(OH, ParamId::Drive, 0.0f); set(OH, ParamId::Level, 0.40f);
+    set(OH, ParamId::Drive, 0.0f); set(OH, ParamId::Level, 0.45f);
 
     set(LT, ParamId::Tune, 0.25f); set(LT, ParamId::Decay, 0.45f);
     set(LT, ParamId::Tone, 0.55f); set(LT, ParamId::Snap,  0.50f);
@@ -159,70 +176,65 @@ int main(int argc, char **argv)
 
     set(RS, ParamId::Tune, 0.40f); set(RS, ParamId::Decay, 0.15f);
     set(RS, ParamId::Tone, 0.50f); set(RS, ParamId::Snap,  0.45f);
-    set(RS, ParamId::Drive, 0.10f); set(RS, ParamId::Level, 0.40f);
+    set(RS, ParamId::Drive, 0.10f); set(RS, ParamId::Level, 0.45f);
 
     set(FM, ParamId::Tune, 0.30f); set(FM, ParamId::Decay, 0.30f);
     set(FM, ParamId::Tone, 0.62f); set(FM, ParamId::Snap,  0.45f);
     set(FM, ParamId::Drive, 0.10f); set(FM, ParamId::Level, 0.45f);
 
-    // 16th notes. Kept as a float so a later swing offset lands sub-sample and
-    // gets rounded once, rather than accumulating error step by step.
+    Pattern   pattern = BuildPattern();
+    Sequencer seq;
+    seq.Init(kSampleRate);
+    seq.SetPattern(&pattern);
+    seq.Start();
+
     const double samples_per_step = (60.0 / kBpm) * kSampleRate / 4.0;
-    const int    total_steps      = kSteps * kBars;
     const int    total_samples
-        = static_cast<int>(samples_per_step * total_steps) + static_cast<int>(kSampleRate);
+        = static_cast<int>(samples_per_step * 16 * kBars) + static_cast<int>(kSampleRate);
+    const int total_blocks = total_samples / static_cast<int>(kBlock);
 
     std::vector<float> audio;
-    audio.reserve(static_cast<size_t>(total_samples) * 2);
+    audio.reserve(static_cast<size_t>(total_blocks) * kBlock * 2);
 
-    int next_step = 0;
-    for(int n = 0; n < total_samples; ++n)
+    Sequencer::Event events[32];
+    for(int b = 0; b < total_blocks; ++b)
     {
-        // Schedule on the exact sample the step falls on.
-        if(next_step < total_steps
-           && n >= static_cast<int>(samples_per_step * next_step))
+        const size_t n = seq.Process(kBlock, events, 32);
+        for(size_t e = 0; e < n; ++e)
         {
-            const int s = next_step % kSteps;
-            for(int t = 0; t < kNumTracks; ++t)
-            {
-                if(solo >= 0 && t != solo)
-                    continue;
-                if(kPattern[t][s] > 0.f)
-                    slots[t].Schedule(0, kPattern[t][s]);
-            }
+            const Sequencer::Event &ev = events[e];
+            if(solo >= 0 && ev.track != solo)
+                continue;
+            slots[ev.track].Schedule(ev.offset, ev.velocity);
             if(trace)
             {
-                const double want = samples_per_step * next_step;
-                std::printf("step %3d  fired@%8d  want %10.2f  err %+.2f smp (%+.4f ms)\n",
-                            next_step, n, want, n - want, (n - want) / kSampleRate * 1000.0);
+                const long abs = static_cast<long>(b) * kBlock + ev.offset;
+                std::printf("%8ld  %-3s vel %.2f  micro %+3d\n",
+                            abs, kNames[ev.track], ev.velocity,
+                            ev.step ? ev.step->micro : 0);
             }
-            ++next_step;
         }
 
-        float mix = 0.f;
-        for(int t = 0; t < kNumTracks; ++t)
-            mix += slots[t].Process();
-
-        mix *= 0.35f; // headroom; the real mixer lives in engine/mixer.cpp later
-        audio.push_back(mix);
-        audio.push_back(mix);
+        for(size_t i = 0; i < kBlock; ++i)
+        {
+            float mix = 0.f;
+            for(int t = 0; t < kNumTracks; ++t)
+                mix += slots[t].Process();
+            mix *= 0.35f;
+            audio.push_back(mix);
+            audio.push_back(mix);
+        }
     }
 
+    if(solo >= 0 && solo < kNumTracks)
+        std::printf("solo: %s\n", kNames[solo]);
     if(!host::WriteWav(out, audio, static_cast<uint32_t>(kSampleRate)))
     {
         std::fprintf(stderr, "could not write %s\n", out);
         return 1;
     }
-
-    static const char *kNames[kNumTracks]
-        = {"BD", "SD", "CH", "OH", "LT", "CP", "RS", "FM"};
-    if(solo >= 0 && solo < kNumTracks)
-        std::printf("solo: %s\n", kNames[solo]);
-
-    std::printf("wrote %s — %.1f s, %d steps @ %.0f BPM\n",
-                out,
-                static_cast<double>(total_samples) / kSampleRate,
-                total_steps,
-                static_cast<double>(kBpm));
+    std::printf("wrote %s — %.1f s @ %.0f BPM, %zu-sample blocks\n",
+                out, static_cast<double>(audio.size() / 2) / kSampleRate,
+                static_cast<double>(kBpm), kBlock);
     return 0;
 }

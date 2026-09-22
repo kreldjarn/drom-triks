@@ -28,3 +28,11 @@ run: $(TARGET)
 
 clean:
 	rm -rf $(BUILD_DIR)
+
+SEQTEST := $(BUILD_DIR)/seqtest
+$(SEQTEST): seqtest.cpp $(wildcard ../src/seq/*.h) | $(BUILD_DIR)
+	$(CXX) $(CXXFLAGS) seqtest.cpp -o $@
+
+.PHONY: seqtest
+seqtest: $(SEQTEST)
+	$(SEQTEST)

@@ -54,6 +54,7 @@ afplay host/build/out.wav
 host/build/render out.wav --solo 4    # one voice alone, for tuning by ear
 host/build/render out.wav --trace     # exact sample each step fires on
 host/build/render --selftest          # voices must be silent until triggered
+make -C host seqtest                  # micro-timing, swing, ratchets, polymeter
 ```
 
 Macro values live at the top of `host/render.cpp` — that's where voice tuning happens.
@@ -68,9 +69,11 @@ sequencer timing checked sample-by-sample long before a board arrives.
 bring-up program — it blinks, plays a sine, and round-trips QSPI to prove the `BOOT_SRAM`
 decision.
 
-**Phase 2 voices complete.** All eight — BD, SD, CH, OH from DaisySP; tom, clap, rimshot and
-2-op FM built from primitives — behind the `IVoice` seam, rendering through the host harness.
-Measured scheduling error: **0.97 samples (0.02 ms)** worst case across 32 steps, against the
-±0.67 ms that block-quantised triggering would cost.
+**Phase 2 complete.** All eight voices — BD, SD, CH, OH from DaisySP; tom, clap, rimshot and
+2-op FM built from primitives — behind the `IVoice` seam.
 
-Next: the sequencer (Phase 3), which is also pure logic and needs no board.
+**Phase 3 core complete.** Sample-accurate 96 PPQN sequencer with **micro-timing** (±23 ticks,
+~5 ms per tick at 120 BPM), swing, probability, ratchets, polymeter and four playback
+directions. Every timing feature is verified in samples by `make -C host seqtest`, not trusted.
+
+Next: parameter locks, pattern chaining, and the MIDI clock PLL — all still board-free.

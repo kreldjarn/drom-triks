@@ -162,7 +162,7 @@ struct ParamLock { uint8_t param_id; uint16_t value; };   // 3 bytes
 struct Step {
     uint8_t   flags;        // active | accent | tie
     uint8_t   velocity;     // 0–127
-    int8_t    micro;        // −48..+48 ticks @ 96 PPQN
+    int8_t    micro;        // −23..+23 ticks @ 96 PPQN (just under one step)
     uint8_t   probability;  // 0–100 %
     uint8_t   ratchet;      // 1–8 retriggers
     uint8_t   lock_count;
@@ -179,6 +179,16 @@ persists comfortably into the 8 MB QSPI with room for kits and wear-levelling.
 Per-track `length` and `speed` give polymeter for free: a 7-step hat track against a 16-step
 kick is one byte of state and the single highest ratio of musical interest to implementation
 effort in the whole sequencer.
+
+**Micro-timing is capped at ±23 ticks — just under one step.** At 24 ticks per 16th that's
+±(23/24) of a step at 1/24-step resolution, about ±5 ms per tick at 120 BPM. Going further
+breaks the data model's meaning: a step pushed a full step late is indistinguishable from the
+next step early, and the UI has no honest way to draw it.
+
+Because a step can move up to a step either way, the tick handler cannot assume *position ==
+step*. It checks the neighbouring positions too — and must de-duplicate, since on a 1- or
+2-step cycle that window wraps onto itself and would otherwise evaluate the same step (and roll
+its probability) up to three times per tick.
 
 **Parameter locks** are the feature worth building the data model around. Hold a step key, turn
 a pot, and that pot's value is recorded for that step only. The engine applies locks on trigger
