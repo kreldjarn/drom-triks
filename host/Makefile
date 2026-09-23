@@ -24,8 +24,18 @@ ENGINE_HDRS := $(wildcard ../src/engine/*.h) $(wildcard ../src/engine/voices/*.h
                $(wildcard ../src/seq/*.h) $(wildcard ../src/io/*.h) \
                $(wildcard ../src/ui/*.h) $(wildcard ../src/util/*.h) ../src/machine.h
 
-.PHONY: all clean run test
+.PHONY: all clean run test linux
 all: $(BUILD_DIR)/render
+
+# Build and test the way CI does: Linux, GCC, libstdc++.
+#
+# Worth having because Apple clang's libc++ includes headers transitively that
+# libstdc++ does not, so a missing #include compiles here and fails there. That
+# is not a hypothetical - it is how CI first went red. Uses its own BUILD_DIR so
+# it cannot collide with the host build's object files.
+linux:
+	docker run --rm -v "$(CURDIR)/..":/src -w /src/host gcc:13 \
+	  make BUILD_DIR=build-linux test
 
 $(BUILD_DIR)/dsp/%.o: $(DAISYSP_DIR)/Source/%.cpp
 	@mkdir -p $(dir $@)

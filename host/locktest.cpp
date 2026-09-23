@@ -5,6 +5,7 @@
 // and it is invisible until you listen to the step after the locked one. So
 // these tests watch every SetParam call rather than the audio.
 
+#include <cmath>
 #include <cstdio>
 #include <vector>
 

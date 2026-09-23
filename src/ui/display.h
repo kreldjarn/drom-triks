@@ -63,8 +63,14 @@ class DisplayRenderer
         // Locking shows which step is being written, because the value on
         // screen belongs to that step and not to the track.
         if(ui.held_step() >= 0)
+        {
+            // Bounded for the same reason as Pct(): the step is always 1..16,
+            // but nothing in the type says so, and an unbounded %-2d makes the
+            // line provably overrunnable as far as the compiler is concerned.
+            const int step = Clamp(ui.held_step() + 1, 1, kNumStepKeys);
             std::snprintf(d.text[1], DisplayLines::kCols + 1,
-                          "LOCK step %-2d  %3d", ui.held_step() + 1, Pct(val));
+                          "LOCK step %-2d  %3d", step, Pct(val));
+        }
         else
             std::snprintf(d.text[1], DisplayLines::kCols + 1, "%18d", Pct(val));
 
@@ -94,11 +100,17 @@ class DisplayRenderer
             std::snprintf(d.text[3], DisplayLines::kCols + 1, "MUTE");
     }
 
+    static int Clamp(int v, int lo, int hi) { return v < lo ? lo : (v > hi ? hi : v); }
+
+    /// Clamp the *integer*, not just the float it came from. Two reasons, and
+    /// neither is style: a NaN passes both float comparisons untouched and
+    /// then casts to garbage, and GCC cannot prove the range through the float
+    /// so every snprintf of a Pct() warns about truncation.
     static int Pct(float v)
     {
         if(v < 0.f) v = 0.f;
         if(v > 1.f) v = 1.f;
-        return static_cast<int>(v * 100.f + 0.5f);
+        return Clamp(static_cast<int>(v * 100.f + 0.5f), 0, 100);
     }
 
     /// A crude bar, because a number alone is hard to read while playing.

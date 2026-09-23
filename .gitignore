@@ -19,3 +19,4 @@ docs/08-sourcing-sweden.md
 # Host build artifacts
 host/build/
 *.wav
+build-linux/
