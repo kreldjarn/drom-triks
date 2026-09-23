@@ -147,6 +147,37 @@ The bring-up code uses `0x100000` (the 1 MB mark), permanently clear of it. See
 [02-firmware.md §8](02-firmware.md#8-persistence) for the full layout. Never call
 `storage.Init(defaults)` without the second argument.
 
+## 7b. If the playground's audio is choppy
+
+`host/build/play --check` reports what fraction of real time the device actually delivered. It
+should be ~100%. Anything well below that will be heard as chopping, because the device is
+starved.
+
+If it is low, test against real hardware to separate the engine from the device:
+
+```sh
+host/build/play --devices
+host/build/play --check --device <id>    # a built-in output, not a virtual one
+```
+
+Same binary at 100% on hardware and 50% on a virtual device means the problem is the device.
+
+**The case we actually hit: a quarantined virtual-audio app.** Background Music was correctly
+installed in `/Applications`, but still carried `com.apple.quarantine` from being downloaded.
+macOS then applies **App Translocation** and runs it from a random read-only mount — *even from
+`/Applications`* — which breaks the coordination between the app and the CoreAudio driver it
+installs. The device then delivered exactly 50% of real time to every client, including a
+forty-line CoreAudio sine with none of our code in it.
+
+```sh
+ps -Ao comm= | grep -i "Background Music.app"     # AppTranslocation in the path = this bug
+sudo xattr -dr com.apple.quarantine "/Applications/Background Music.app"
+# then quit the app from its menu-bar icon and relaunch it
+```
+
+The tell is that it is intermittent across launches rather than permanent, since translocation
+is decided per launch. That is also why the same app can record fine one day and not the next.
+
 ## 8. Done when
 
 - `make` builds clean

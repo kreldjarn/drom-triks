@@ -473,8 +473,9 @@ int main(int argc, char **argv)
         const uint32_t tick = g_machine.state().tick.load();
         std::printf("audio device   : opened at %.0f Hz\n", g_sample_rate);
         std::printf("transport      : %s\n", playing ? "playing" : "STOPPED");
-        std::printf("ticks advanced : %u (expect ~%d after 0.5 s at 124 BPM)\n",
-                    tick, static_cast<int>(124.0 / 60.0 * kPpqn * 0.5));
+        const double secs = g_check_ms / 1000.0;
+        std::printf("ticks advanced : %u (expect ~%d in %.1f s at 124 BPM)\n",
+                    tick, static_cast<int>(124.0 / 60.0 * kPpqn * secs), secs);
         std::printf("tempo          : %.1f BPM\n", g_machine.state().tempo.load());
         std::printf("elapsed        : %.3f s\n", el);
         std::printf("callbacks      : %u\n", g_callbacks.load());
