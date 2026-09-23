@@ -162,8 +162,30 @@ a bell, and only the first is obvious:
 3. **Bit and rate reduction.** The hardware being imitated ran 12-bit converters; that grit is
    part of the sound, not a flaw. DaisySP's `Decimator` provides it.
 
-`SNAP` sets both index depth and how fast it collapses, so turning it up makes a hit *sharper*
-rather than merely brighter. `DRIVE` buys grit: feedback first, bit reduction on top.
+A **third operator** modulates the carrier in parallel with op2, at a ratio deliberately
+incommensurate with it so the two sideband families never line up. It engages only in the upper
+half of `SNAP` and rides a squared copy of the index envelope, so it decays faster than op2 —
+an attack thickener rather than a drone.
+
+It was first built as a *stack* (op3 → op2), and an A/B with op3 disabled showed that barely
+changed the output at all: once op2 is deep enough to sound metallic it is already near-chaotic,
+so feeding it more does very little. In parallel the effect is consistent — periodicity drops
+about 10% at every setting where it is active — but it is a refinement, not a transformation.
+Two-operator FM at these indices is already dense, which leaves a third operator limited room.
+
+`SNAP` sets index depth, collapse rate and op3 depth together, so turning it up makes a hit
+*sharper* rather than merely brighter.
+
+`DRIVE` is a layered grit control rather than one effect: operator feedback first, bit reduction
+over the top, then sample-rate reduction at the extreme. There is no spare macro to give these
+separate knobs, and stacking them gives one usable sweep from clean to destroyed. Only the bottom
+third of the downsample range is musical — DaisySP's `Decimator` maps its factor to a hold of up
+to 96 samples, which past about 0.3 is a buzz rather than a drum.
+
+**Index is in turns, not radians.** `FastSin` takes a 0..1 phase, so textbook FM indices of 0–9
+would mean nine whole cycles of phase modulation — noise at every setting rather than a tone.
+The first implementation had exactly that bug, and it showed up as a zero-crossing measurement
+pinned near Nyquist across the entire parameter range.
 
 The oscillators use a parabolic sine approximation rather than `sinf` — two evaluations per
 sample per voice makes it worth it, and the ~0.1% error is orders of magnitude below the grit

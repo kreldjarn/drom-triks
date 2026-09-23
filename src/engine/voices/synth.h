@@ -254,7 +254,7 @@ inline float FastSin(float phase)
     return 0.225f * (y * b - y) + y;
 }
 
-/// Two-operator FM with operator feedback — the Machinedrum EFM shape.
+/// Three-operator FM with operator feedback — the Machinedrum EFM shape.
 ///
 /// Three things separate percussive FM from a bell, and only the first is
 /// obvious:
@@ -268,6 +268,12 @@ inline float FastSin(float phase)
 ///     metallic percussion read as metal rather than as a tuned tone.
 ///  3. **Bit and rate reduction.** The hardware this imitates ran 12-bit
 ///     converters, and that grit is part of the sound rather than a flaw.
+///
+/// op2 and op3 modulate the carrier in parallel, at ratios chosen to be
+/// incommensurate so their sidebands never line up. op3 only engages in the
+/// upper half of SNAP and rides a squared copy of the index envelope, so it
+/// decays faster than op2 — an attack thickener rather than a drone, and one
+/// knob from a clean two-op tone to a dense metallic crash.
 ///
 /// Covers cowbell, metallic percussion, sharp blips and sub depending mostly
 /// on where TONE (ratio) and SNAP (index) sit.
@@ -291,7 +297,8 @@ class FmVoice : public VoiceBase
         pitch_.SetMax(1.f);
         pitch_.SetMin(0.f);
         crush_.Init();
-        crush_.SetDownsampleFactor(0.f);
+        crush_.SetDownsampleFactor(0.f); // 0 = sample-accurate, no hold
+        crush_.SetBitsToCrush(0);
         Retime();
     }
 
@@ -301,6 +308,7 @@ class FmVoice : public VoiceBase
         active_  = true;
         cphase_  = 0.f;
         mphase_  = 0.f;
+        m3phase_ = 0.f;
         fb_      = 0.f;
         amp_.Trigger();
         idx_.Trigger();
@@ -324,19 +332,34 @@ class FmVoice : public VoiceBase
         const float minc = hz * ratio_ * inv_sr_;
         const float cinc = hz * inv_sr_;
 
+        // op3 modulates the carrier in PARALLEL with op2, not stacked into it.
+        // Stacking was tried and measured: once op2 is deep enough to sound
+        // metallic it is already near-chaotic, so a third operator feeding it
+        // just adds more of the same and changes the character barely at all.
+        // In parallel, at a ratio deliberately incommensurate with op2's, it
+        // contributes its own sideband family instead.
+        float m3 = 0.f;
+        if(stack_ > 0.f)
+        {
+            m3 = FastSin(m3phase_) * stack_ * ie * ie;
+            m3phase_ += hz * ratio3_ * inv_sr_;
+            if(m3phase_ >= 1.f)
+                m3phase_ -= 1.f;
+        }
+
         const float m = FastSin(mphase_ + fb_ * feedback_);
         fb_           = m;
         mphase_ += minc;
         if(mphase_ >= 1.f)
             mphase_ -= 1.f;
 
-        const float c = FastSin(cphase_ + m * index_ * ie);
+        const float c = FastSin(cphase_ + m * index_ * ie + m3);
         cphase_ += cinc;
         if(cphase_ >= 1.f)
             cphase_ -= 1.f;
 
         float out = c * ae * vel_;
-        if(bits_ > 0)
+        if(gritty_)
             out = crush_.Process(out);
         return Shape(out);
     }
@@ -350,24 +373,61 @@ class FmVoice : public VoiceBase
             case ParamId::Decay: Retime(); break;
             // Integer ratios stay harmonic; the space between them is where
             // the metallic, inharmonic tones live. The useful range spans both.
-            case ParamId::Tone: ratio_ = 0.5f + v * 11.5f; break;
-            // SNAP sets how much modulation there is *and* how fast it
-            // collapses. Turning it up makes the hit sharper, not just brighter.
+            case ParamId::Tone:
+                ratio_ = 0.5f + v * 11.5f;
+                // Incommensurate with op2 by an irrational factor, so op3's
+                // sidebands never line up with op2's and the two families stay
+                // audibly separate. That separation is the metallic character.
+                ratio3_ = ratio_ * 0.6180f + 1.37f;
+                break;
+            // SNAP sets modulation depth, how fast it collapses, and — past
+            // halfway — how much of op3 joins in. One knob from clean to
+            // aggressive, which is how the hardware behaves.
             case ParamId::Snap:
-                index_ = v * 9.f;
+                // Index is in TURNS, not radians, because FastSin takes a 0..1
+                // phase. Textbook FM indices of 0-9 are radians; the same
+                // numbers here would be nine whole cycles of phase modulation,
+                // which is noise at every setting rather than a tone. 1.4 turns
+                // is about 8.8 rad — deep, but still recognisably FM.
+                index_ = v * 1.4f;
+                stack_ = Ramp(v, 0.45f, 1.0f) * 0.9f;
                 Retime();
                 break;
-            // DRIVE buys grit: feedback first, then bit reduction on top.
+            // DRIVE is a layered grit control rather than one effect: operator
+            // feedback first, bit reduction over the top, then sample-rate
+            // reduction at the extreme. There is no spare macro for these
+            // separately, and stacking them this way gives one usable sweep
+            // from clean to destroyed.
             case ParamId::Drive:
-                feedback_ = v * 0.85f;
-                bits_     = static_cast<uint8_t>(v * 7.f);
-                crush_.SetBitsToCrush(bits_);
+            {
+                feedback_ = Ramp(v, 0.0f, 0.45f) * 0.85f;
+                const uint8_t bits
+                    = static_cast<uint8_t>(Ramp(v, 0.30f, 0.80f) * 6.f);
+                // Only the bottom third of the factor is musical: it maps to a
+                // hold of up to 96 samples, which past ~0.3 is a buzz, not a
+                // drum.
+                const float ds = Ramp(v, 0.60f, 1.0f) * 0.30f;
+                crush_.SetBitsToCrush(bits);
+                crush_.SetDownsampleFactor(ds);
+                gritty_ = bits > 0 || ds > 0.f;
                 break;
+            }
             default: break;
         }
     }
 
   private:
+    /// 0 below `lo`, rising linearly to 1 at `hi`. Used to layer several
+    /// effects onto one knob without steps at the hand-over points.
+    static float Ramp(float v, float lo, float hi)
+    {
+        if(v <= lo)
+            return 0.f;
+        if(v >= hi)
+            return 1.f;
+        return (v - lo) / (hi - lo);
+    }
+
     void Retime()
     {
         amp_.SetTime(daisysp::ADENV_SEG_DECAY, 0.015f + param(ParamId::Decay) * 1.4f);
@@ -380,13 +440,15 @@ class FmVoice : public VoiceBase
     daisysp::AdEnv     amp_, idx_, pitch_;
     daisysp::Decimator crush_;
     float              inv_sr_   = 1.f / 48000.f;
-    float              cphase_ = 0.f, mphase_ = 0.f, fb_ = 0.f;
+    float              cphase_ = 0.f, mphase_ = 0.f, m3phase_ = 0.f, fb_ = 0.f;
     float              base_hz_  = 200.f;
     float              ratio_    = 3.5f;
+    float              ratio3_   = 3.5f * 2.37f;
     float              index_    = 4.f;
+    float              stack_    = 0.f; ///< op3 -> op2 depth
     float              feedback_ = 0.f;
     float              vel_      = 1.f;
-    uint8_t            bits_     = 0;
+    bool               gritty_   = false;
 };
 
 } // namespace drom
