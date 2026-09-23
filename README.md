@@ -55,6 +55,13 @@ The voice engine and sequencer have no hardware dependency, so they build and ru
 make -C host play
 ```
 
+```sh
+host/build/play --devices        # list output devices
+host/build/play --device 84      # bypass a virtual device (BlackHole, Background Music…)
+host/build/play --record         # start recording; r toggles it, saved on quit
+host/build/play --check          # verify audio opens and runs at real-time rate
+```
+
 Real-time audio through CoreAudio, the keyboard standing in for the panel, and the LEDs drawn as
 truecolour blocks using the *same* renderers the firmware will use. Not a mock-up of the
 instrument — the instrument, with a different set of pins.
