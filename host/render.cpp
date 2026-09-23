@@ -70,14 +70,15 @@ const std::vector<TrackDef> kSong = {
     {CP, 16, {{4, 110, +3}}},
     // A 7-step rim against everything else's 16: polymeter for free.
     {RS, 7, {{3, 70, 0}}},
-    // Parameter locks doing the thing they exist for: one FM voice playing a
-    // melodic line, because TUNE is locked per step. Without locks this needs
-    // four tracks; with them it is one track and four numbers.
-    {FM, 16, {{1,  85, 0, {{ParamId::Tune, 0.18f}, {ParamId::Decay, 0.18f}}},
-              {5,  75, 0, {{ParamId::Tune, 0.30f}, {ParamId::Decay, 0.14f}}},
-              {9,  85, 0, {{ParamId::Tune, 0.24f}, {ParamId::Decay, 0.18f}}},
-              {13, 95, 0, {{ParamId::Tune, 0.42f}, {ParamId::Decay, 0.30f},
-                           {ParamId::Snap,  0.75f}}}}},
+    // Parameter locks doing the thing they exist for: one EFM voice covering
+    // four different metallic percussion sounds, because TONE (ratio) and SNAP
+    // (index) are locked per step. Without locks this needs four tracks.
+    {FM, 16, {{1,  85, 0, {{ParamId::Tune, 0.30f}, {ParamId::Tone, 0.62f}}},
+              {5,  70, 0, {{ParamId::Tune, 0.52f}, {ParamId::Tone, 0.88f},
+                           {ParamId::Snap, 0.90f}}},
+              {9,  85, 0, {{ParamId::Tune, 0.30f}, {ParamId::Tone, 0.62f}}},
+              {13, 98, 0, {{ParamId::Tune, 0.20f}, {ParamId::Tone, 0.44f},
+                           {ParamId::Snap, 0.80f}, {ParamId::Decay, 0.34f}}}}},
 };
 
 Pattern BuildPattern()
@@ -206,9 +207,11 @@ int main(int argc, char **argv)
     set(RS, ParamId::Tone, 0.50f); set(RS, ParamId::Snap,  0.45f);
     set(RS, ParamId::Drive, 0.10f); set(RS, ParamId::Level, 0.45f);
 
-    set(FM, ParamId::Tune, 0.30f); set(FM, ParamId::Decay, 0.30f);
-    set(FM, ParamId::Tone, 0.62f); set(FM, ParamId::Snap,  0.45f);
-    set(FM, ParamId::Drive, 0.10f); set(FM, ParamId::Level, 0.45f);
+    // EFM territory: inharmonic ratio, high index that collapses fast, and
+    // enough DRIVE for operator feedback plus a little bit reduction.
+    set(FM, ParamId::Tune, 0.30f); set(FM, ParamId::Decay, 0.18f);
+    set(FM, ParamId::Tone, 0.62f); set(FM, ParamId::Snap,  0.78f);
+    set(FM, ParamId::Drive, 0.38f); set(FM, ParamId::Level, 0.55f);
 
     Pattern   pattern = BuildPattern();
     Sequencer seq;

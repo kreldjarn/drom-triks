@@ -236,36 +236,109 @@ class RimShot : public VoiceBase
     float               base_hz_ = 400.f, detune_ = 1.4f, vel_ = 1.f;
 };
 
-/// Two-operator FM. The utility voice — cowbell, metallic percussion, sub,
-/// bell tones — depending where TONE (ratio) and SNAP (index) sit.
+/// Cheap sine over a phase that need not be wrapped by the caller.
+///
+/// Two evaluations per sample per voice makes sinf worth avoiding; this is the
+/// standard parabolic approximation with one refinement pass, accurate to
+/// roughly 0.1%. That error is orders of magnitude below the grit this voice
+/// adds deliberately.
+inline float FastSin(float phase)
+{
+    phase = phase - static_cast<float>(static_cast<int>(phase));
+    if(phase < 0.f)
+        phase += 1.f;
+    const float t = phase * 2.f - 1.f;          // [-1, 1) ~ [-pi, pi)
+    const float a = t < 0.f ? -t : t;
+    float       y = 4.f * t * (1.f - a);
+    const float b = y < 0.f ? -y : y;
+    return 0.225f * (y * b - y) + y;
+}
+
+/// Two-operator FM with operator feedback — the Machinedrum EFM shape.
+///
+/// Three things separate percussive FM from a bell, and only the first is
+/// obvious:
+///
+///  1. **The modulation index must decay**, and faster than the amplitude. A
+///     static index gives an organ or a bell; an index that collapses in a few
+///     milliseconds gives a transient with a body behind it. This is most of
+///     the "punch".
+///  2. **Operator feedback** — the modulator folded back into its own phase.
+///     Past roughly 0.6 it breaks into noise, which is exactly what makes
+///     metallic percussion read as metal rather than as a tuned tone.
+///  3. **Bit and rate reduction.** The hardware this imitates ran 12-bit
+///     converters, and that grit is part of the sound rather than a flaw.
+///
+/// Covers cowbell, metallic percussion, sharp blips and sub depending mostly
+/// on where TONE (ratio) and SNAP (index) sit.
 class FmVoice : public VoiceBase
 {
   public:
     void Init(float sr) override
     {
-        fm_.Init(sr);
-        env_.Init(sr);
-        env_.SetTime(daisysp::ADENV_SEG_ATTACK, 0.0005f);
-        env_.SetMax(1.f);
-        env_.SetMin(0.f);
+        inv_sr_ = 1.f / sr;
+        amp_.Init(sr);
+        amp_.SetTime(daisysp::ADENV_SEG_ATTACK, 0.0004f);
+        amp_.SetMax(1.f);
+        amp_.SetMin(0.f);
+        idx_.Init(sr);
+        idx_.SetTime(daisysp::ADENV_SEG_ATTACK, 0.0002f);
+        idx_.SetMax(1.f);
+        idx_.SetMin(0.f);
+        pitch_.Init(sr);
+        pitch_.SetTime(daisysp::ADENV_SEG_ATTACK, 0.0002f);
+        pitch_.SetTime(daisysp::ADENV_SEG_DECAY, 0.02f);
+        pitch_.SetMax(1.f);
+        pitch_.SetMin(0.f);
+        crush_.Init();
+        crush_.SetDownsampleFactor(0.f);
         Retime();
     }
 
     void Trigger(float velocity) override
     {
-        vel_    = velocity;
-        active_ = true;
-        env_.Trigger();
+        vel_     = velocity;
+        active_  = true;
+        cphase_  = 0.f;
+        mphase_  = 0.f;
+        fb_      = 0.f;
+        amp_.Trigger();
+        idx_.Trigger();
+        pitch_.Trigger();
     }
 
     float Process() override
     {
         if(!active_)
             return 0.f;
-        const float e = env_.Process();
-        if(!env_.IsRunning())
+
+        const float ae = amp_.Process();
+        if(!amp_.IsRunning())
             active_ = false;
-        return Shape(fm_.Process() * e * vel_);
+        const float ie = idx_.Process();
+        const float pe = pitch_.Process();
+
+        // A short pitch blip on top of the FM, which is what stops high-ratio
+        // settings sounding static.
+        const float hz   = base_hz_ * (1.f + pe * 0.6f);
+        const float minc = hz * ratio_ * inv_sr_;
+        const float cinc = hz * inv_sr_;
+
+        const float m = FastSin(mphase_ + fb_ * feedback_);
+        fb_           = m;
+        mphase_ += minc;
+        if(mphase_ >= 1.f)
+            mphase_ -= 1.f;
+
+        const float c = FastSin(cphase_ + m * index_ * ie);
+        cphase_ += cinc;
+        if(cphase_ >= 1.f)
+            cphase_ -= 1.f;
+
+        float out = c * ae * vel_;
+        if(bits_ > 0)
+            out = crush_.Process(out);
+        return Shape(out);
     }
 
   protected:
@@ -273,12 +346,23 @@ class FmVoice : public VoiceBase
     {
         switch(id)
         {
-            case ParamId::Tune: fm_.SetFrequency(40.f + v * 760.f); break;
+            case ParamId::Tune: base_hz_ = 40.f + v * 760.f; break;
             case ParamId::Decay: Retime(); break;
-            // Non-integer ratios give inharmonic, bell-like tones; integers
-            // stay harmonic. The useful range spans both.
-            case ParamId::Tone: fm_.SetRatio(0.5f + v * 11.5f); break;
-            case ParamId::Snap: fm_.SetIndex(v * 5.f); break;
+            // Integer ratios stay harmonic; the space between them is where
+            // the metallic, inharmonic tones live. The useful range spans both.
+            case ParamId::Tone: ratio_ = 0.5f + v * 11.5f; break;
+            // SNAP sets how much modulation there is *and* how fast it
+            // collapses. Turning it up makes the hit sharper, not just brighter.
+            case ParamId::Snap:
+                index_ = v * 9.f;
+                Retime();
+                break;
+            // DRIVE buys grit: feedback first, then bit reduction on top.
+            case ParamId::Drive:
+                feedback_ = v * 0.85f;
+                bits_     = static_cast<uint8_t>(v * 7.f);
+                crush_.SetBitsToCrush(bits_);
+                break;
             default: break;
         }
     }
@@ -286,12 +370,23 @@ class FmVoice : public VoiceBase
   private:
     void Retime()
     {
-        env_.SetTime(daisysp::ADENV_SEG_DECAY, 0.02f + param(ParamId::Decay) * 1.5f);
+        amp_.SetTime(daisysp::ADENV_SEG_DECAY, 0.015f + param(ParamId::Decay) * 1.4f);
+        // The index envelope is always shorter than the amplitude envelope —
+        // that ordering is what makes it read as a transient.
+        idx_.SetTime(daisysp::ADENV_SEG_DECAY,
+                     0.004f + (1.f - param(ParamId::Snap)) * 0.10f);
     }
 
-    daisysp::Fm2   fm_;
-    daisysp::AdEnv env_;
-    float          vel_ = 1.f;
+    daisysp::AdEnv     amp_, idx_, pitch_;
+    daisysp::Decimator crush_;
+    float              inv_sr_   = 1.f / 48000.f;
+    float              cphase_ = 0.f, mphase_ = 0.f, fb_ = 0.f;
+    float              base_hz_  = 200.f;
+    float              ratio_    = 3.5f;
+    float              index_    = 4.f;
+    float              feedback_ = 0.f;
+    float              vel_      = 1.f;
+    uint8_t            bits_     = 0;
 };
 
 } // namespace drom

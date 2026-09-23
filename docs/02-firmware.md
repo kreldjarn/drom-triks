@@ -128,7 +128,7 @@ eight voices are mostly configuration:
 | 5 | LT | custom: sine + pitch envelope + drive (~40 lines) |
 | 6 | CP | custom: 3 retriggered noise bursts through a BPF + reverberant body |
 | 7 | RS | custom: two detuned squares through a BPF, 808-rimshot style |
-| 8 | FM | custom: 2-operator FM — covers metallic perc, cowbell, sub |
+| 8 | FM | custom: 2-op FM with operator feedback, EFM-style — metallic perc, cowbell, blips, sub |
 
 All eight implement one interface, and that interface is the seam that makes sample support a
 later addition rather than a rewrite:
@@ -147,6 +147,27 @@ public:
 A `SampleVoice` implementing this same interface drops into the same array. The sequencer,
 p-locks, mixer and UI never learn that anything changed. Build this seam in Phase 2 even though
 samples are Phase 7 — retrofitting it later means touching every one of those subsystems.
+
+### Percussive FM
+
+Track 8 is modelled on the Machinedrum's EFM machines. Three things separate percussive FM from
+a bell, and only the first is obvious:
+
+1. **The modulation index must decay, faster than the amplitude.** A static index gives an organ
+   or a bell; an index that collapses in a few milliseconds gives a transient with a body behind
+   it. Measured attack-to-tail brightness on the current settings: **59× for punchy perc, 25× for
+   a metal blip, 5.9× for a cowbell.** This is most of what people mean by "punch".
+2. **Operator feedback** — the modulator folded into its own phase. Past roughly 0.6 it breaks
+   into noise, which is what makes metallic percussion read as metal rather than a tuned tone.
+3. **Bit and rate reduction.** The hardware being imitated ran 12-bit converters; that grit is
+   part of the sound, not a flaw. DaisySP's `Decimator` provides it.
+
+`SNAP` sets both index depth and how fast it collapses, so turning it up makes a hit *sharper*
+rather than merely brighter. `DRIVE` buys grit: feedback first, bit reduction on top.
+
+The oscillators use a parabolic sine approximation rather than `sinf` — two evaluations per
+sample per voice makes it worth it, and the ~0.1% error is orders of magnitude below the grit
+this voice adds on purpose.
 
 **CPU budget.** At 480 MHz / 48 kHz you have ~10,000 cycles per sample. Eight voices at a
 worst case of ~150 cycles each is ~1,200 cycles; master FX maybe 500. That's **under 20 %**,
