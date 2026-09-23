@@ -49,7 +49,19 @@ class BassDrum : public VoiceBase
     bool                    pending_ = false;
 };
 
-/// 808-style snare. SNAP is the noise/body balance, the defining snare control.
+/// Snare. SNAP is the noise/body balance, the defining snare control.
+///
+/// Uses DaisySP's SyntheticSnareDrum rather than AnalogSnareDrum, which sounds
+/// closer to an 808 but whose DECAY parameter does not work: its body
+/// resonators are given a Q of 2000·2^(decay·7), which even at decay 0 rings
+/// for about a second, and measured across the whole range the tail never
+/// fell below −40 dB inside five seconds and was not even monotonic. The
+/// result is a long ringing pitched tail no setting can shorten.
+///
+/// The synthetic model measures 88 ms at DECAY 0 rising to 2.8 s at full,
+/// which is what the knob is supposed to do. If the analog model is ever
+/// wanted for its character, it needs an amplitude envelope wrapped around it
+/// to make DECAY authoritative — the model will not do it alone.
 class SnareDrum : public VoiceBase
 {
   public:
@@ -75,15 +87,17 @@ class SnareDrum : public VoiceBase
         {
             case ParamId::Tune: d_.SetFreq(120.f + v * 280.f); break;
             case ParamId::Decay: d_.SetDecay(v); break;
-            case ParamId::Tone: d_.SetTone(v); break;
+            // This model has no tone control; FM amount shapes the body in a
+            // comparable way, from hollow to metallic.
+            case ParamId::Tone: d_.SetFmAmount(v); break;
             case ParamId::Snap: d_.SetSnappy(v); break;
             default: break;
         }
     }
 
   private:
-    daisysp::AnalogSnareDrum d_;
-    bool                     pending_ = false;
+    daisysp::SyntheticSnareDrum d_;
+    bool                        pending_ = false;
 };
 
 /// Hi-hat, templated on the noise source so closed and open share one body of

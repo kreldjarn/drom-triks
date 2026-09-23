@@ -122,7 +122,7 @@ eight voices are mostly configuration:
 | # | Voice | Implementation |
 | --- | --- | --- |
 | 1 | BD | `AnalogBassDrum` / `SyntheticBassDrum` (switchable model) |
-| 2 | SD | `AnalogSnareDrum` / `SyntheticSnareDrum` (switchable) |
+| 2 | SD | `SyntheticSnareDrum` — see below; the analog model's DECAY does not work |
 | 3 | CH | `HiHat<SquareNoise, LinearVCA>` |
 | 4 | OH | `HiHat<RingModNoise, SwingVCA>` |
 | 5 | LT | custom: sine + pitch envelope + drive (~40 lines) |
@@ -181,6 +181,25 @@ over the top, then sample-rate reduction at the extreme. There is no spare macro
 separate knobs, and stacking them gives one usable sweep from clean to destroyed. Only the bottom
 third of the downsample range is musical — DaisySP's `Decimator` maps its factor to a hold of up
 to 96 samples, which past about 0.3 is a buzz rather than a drum.
+
+### DaisySP's AnalogSnareDrum has an unusable DECAY
+
+Worth recording, because the symptom is a long ringing pitched tail that no setting shortens and
+the obvious suspects are all wrong. The model gives its body resonators a Q of
+`2000 · 2^(decay·7)`, so even at DECAY 0 they ring for about a second. Measured across the whole
+range, the tail never fell below −40 dB inside five seconds, and it was not even monotonic:
+
+```
+DECAY      0.00   0.10   0.25   0.50   0.75   1.00
+-40 dB ms   988   1217   1447   1218   1218   2626
+```
+
+`SyntheticSnareDrum` behaves: 103 ms at DECAY 0 rising smoothly to seconds at full. That is what
+track 2 uses. If the analog model is ever wanted for its 808 character, it needs an amplitude
+envelope wrapped around it to make DECAY authoritative — the model will not do it alone.
+
+Every other DaisySP voice scales correctly, so this is specific to that one class rather than a
+general problem with the library.
 
 ### Two envelope mistakes worth not repeating
 
