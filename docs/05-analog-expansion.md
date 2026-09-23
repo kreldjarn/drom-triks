@@ -282,7 +282,14 @@ failure the rule exists to prevent.
 
 The track itself is fully useful meanwhile: steps, locks, length, speed, probability, ratchets and
 micro-timing all work and all reach the 74HC595, so tracks 9–12 are a four-channel trigger
-sequencer for Eurorack or an external drum module from the first power-on.
+sequencer for Eurorack or an external drum module from the first power-on — which is only true
+because the four spare trigger jacks are populated in v1. They were on the v2 list until this
+section made a claim that needed them, at which point $4 of jacks was cheaper than the asterisk.
+
+**Variable gate width needs a counter the timing model doesn't have yet.** `trigger_delay` counts
+down to the moment a gate goes *on*; nothing counts it back off. DECAY-as-gate-width needs a
+second per-track countdown, set at fire time and clearing the 595 bit when it expires. See
+[firmware §3](02-firmware.md#3-timing-model).
 
 ### 4.6 Swap with the power off
 
@@ -326,7 +333,8 @@ Eurorack jacks.
 | 2×12 expansion header footprint, 2×10 populated | $0.90 | Yes — pins 21–24 carry the SAI2 signals of §6.2 |
 | 74HC595 → 8 trigger outputs | $0.60 | Yes — drives Eurorack and external drum modules immediately |
 | 2 × 3.5 mm audio-in jacks | $2.00 | Yes — enables architecture A on day one |
-| **Total** | **$5.00** | |
+| 4 × 3.5 mm trigger-out jacks | $4.00 | Yes — §4.5 claims the trigger tracks drive Eurorack from power-on; these are what make that true |
+| **Total** | **$9.00** | |
 
 **Power.** Analog audio circuits want **±12 V**, which is not viable from a 500 mA USB budget
 alongside 34 RGB LEDs. Route a raw **VIN (9–12 V)** trace to the header and let each carrier make
@@ -351,8 +359,18 @@ What libDaisy tells us, verified rather than recalled:
   `fs = D27, mclk = D24, sck = D28, sb = D25, sa = D26`.
 - The alternate-function handling in `src/per/sai.cpp:407-416` is hardcoded — `GPIO_AF10_SAI2` for
   every pin, with PA2/D28 special-cased to AF8.
-- `sai.cpp:198` calls `HAL_SAI_InitProtocol(..., 2)`. **Two slots, hardcoded.** Four channels means
-  either both data lines (`sa` + `sb`) or TDM on one line with libDaisy patched.
+- `sai.cpp:198` calls `HAL_SAI_InitProtocol(..., 2)`. **Two slots, hardcoded.**
+
+**Four channels therefore has exactly one route, and it is a libDaisy fork.** An earlier draft
+offered two — TDM on one data line, or both data lines for the cost of a fourth pin — but the
+second isn't real: the two data lines are `sa` (PD11/D26) and `sb` (**PA0/D25**), and D25 is
+`DISP_RST`. Taking it means moving the OLED to an RC power-on reset, which is a display change to
+buy an audio feature. So the honest position is that four-channel capture means patching
+libDaisy's hardcoded slot count, and "a carrier upgrade rather than a respin" rests on being
+willing to carry that fork.
+
+**Two channels needs no fork.** If two of the four cartridges being individually digitised (and
+the other two summed) is worth more than the fork is worth avoiding, that option is free.
 
 **`SAI2_FS` exists only on PG9.** That pin was `ENC1_A` when the six macros were pots and the two
 navigation encoders sat on direct GPIO, and nothing could be moved out of its way — every other

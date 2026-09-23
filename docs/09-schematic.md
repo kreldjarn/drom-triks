@@ -83,7 +83,8 @@ look.
   USB. 34 LEDs PWMing into a shared ground plane is an audible buzz and very hard to fix after
   layout. Draw it as separate nets (`AGND` / `PGND`) now so layout can honour it.
 - **Analog expansion reservations** ([05-analog-expansion.md](05-analog-expansion.md)): DC barrel
-  jack footprint, 2×12 header footprint, 74HC595, audio-in jacks. $5.00 against a respin.
+  jack footprint, 2×12 header footprint, 74HC595, audio-in and trigger-out jacks. $9.00
+  against a respin.
 - **Unpopulated footprints are free**: SD socket, CV/expression jacks, clock jacks. Draw them now.
 
 ## 6. Decide before layout, not during

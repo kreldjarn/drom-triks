@@ -312,8 +312,20 @@ extra and looks intentional.
 know you won't be moving a knob 2 mm to the left.
 
 Switches: Cherry MX / Gateron with clear or translucent housings (the SMD LED cutout in the
-switch body is what the SK6812 shines through). Add **hot-swap sockets** — $3 for the set, and
-you can change switch feel without desoldering 30 switches from a panel you've already legended.
+switch body is what the SK6812 shines through).
+
+**Hot-swap sockets and "the PCB is the panel" are in tension, and v1 picks the sockets.** Kailh
+sockets assume a plate takes the insertion force; with the switch soldered to nothing and the
+board unsupported, the socket's solder joints are the only retention and the board flexes on every
+swap. Two honest options:
+
+- **Add a plate.** A 1.5 mm FR4 or aluminium plate over the PCB, on standoffs — this is the v2
+  sandwich brought forward, and it costs the "the PCB is the panel" saving.
+- **Support the board locally.** Standoffs on a grid between the switch rows rather than only at
+  the corners, so the flex has nowhere to go. Cheaper, uglier, and enough at 34 switches.
+
+Doing neither makes the sockets worse than soldered switches, because they add a failure mode and
+buy a swap you won't risk performing.
 
 Pots: Alpha 9 mm vertical (RD901F) with Davies-1900-style knobs. Encoders: Bourns PEC11R with
 detents and a push switch.
@@ -329,11 +341,12 @@ adding it later costs a board respin:
 | Reservation | Cost | Populate in v1? |
 | --- | ---: | --- |
 | 2.1 mm DC barrel jack + Schottky, diode-OR'd with USB 5 V | $1.50 | Footprint only — analog circuits need ±12 V, which USB can't supply |
-| 2×12 expansion header footprint (5 V, VIN, AGND, 8 triggers, SPI, I2C, audio return) | $0.90 | 2×10 populated; two spare positions pending the check below |
+| 2×12 expansion header footprint (5 V, VIN, AGND, 8 triggers, SPI, I2C, audio return) | $0.90 | 2×10 populated; pins 21–24 carry the SAI2 signals below |
 | 74HC595 → 8 trigger outputs | $0.60 | Yes — four go to cartridge slots, four to Eurorack |
 | Stereo audio **input** jacks | $2.00 | Yes — the Seed3's unused audio input becomes an analog FX insert loop |
+| 4 × 3.5 mm trigger-**out** jacks | $4.00 | Yes — otherwise the eight trigger outputs reach an unpopulated header |
 
-**$5.00 against a $40 respin and three weeks of lead time.** The ±12 V generator itself belongs
+**$9.00 against a $40 respin and three weeks of lead time.** The ±12 V generator itself belongs
 on the carrier, not here — a switching converter next to the audio codec is a noise problem
 you'd be solving before there's any benefit.
 

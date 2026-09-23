@@ -66,11 +66,30 @@ measurement that matters is whether it sounds right.
 | Item | ~Cost | Why |
 | --- | ---: | --- |
 | **Bench PSU with current limiting** | $60–90 | Set a low current limit, power the new board, watch. Turns "released the magic smoke" into "hit the limit, found the short" |
-| **USB power meter** | $15 | Checks real draw against the ~480 mA budget in [hardware §4](01-hardware.md#4-power) — especially LED brightness |
-| **Hot air rework station** | $50–100 | Only if you hand-assemble SMD or need to rework it. Deferrable |
+| **USB power meter** | $15 | Checks real draw against the ~505 mA budget in [hardware §4](01-hardware.md#4-power) — which is now *past* USB 2.0's 500 mA, so this is a measurement rather than a formality |
+| **SMD hotplate** | $25–40 | **Not deferrable if you reflow the LEDs yourself** — see below |
+| **Hot air rework station** | $50–100 | For rework and for the SOIC/SOT parts. Deferrable if the hotplate covers the reflow |
 
 The bench supply is the one I'd genuinely recommend before first power-on of a new PCB. A shorted
-rail on a $40 board is a cheap lesson only if you catch it in the first second.
+rail is a cheap lesson only if you catch it in the first second.
+
+### The LEDs are a second reflow side, and they are the hard part
+
+34 SK6812 MINI-E are **reverse-mount**: they sit on the opposite face from the switches and shine
+up through them. That makes the board a two-sided reflow job, and it is the single hardest
+manufacturing step in the build — 34 parts that are small, orientation-sensitive, and destroyed by
+too much heat.
+
+Two routes, and it is worth pricing both **before** ordering the PCB rather than discovering the
+problem with bare boards in hand:
+
+| Route | Cost | Notes |
+| --- | ---: | --- |
+| **JLCPCB assembly, LEDs only** | ~$40–70 setup + parts | They place and reflow the LED side; you hand-solder the switches and through-hole. Removes the risk entirely |
+| **Reflow them yourself** | ~$25–40 hotplate + ~$15 stencil and paste | Viable, and the stencil has to be ordered *with* the PCB — it is sized to the board |
+
+Either way the BOM needs the line. Hand-soldering 34 reverse-mount LEDs with an iron is not a
+route; it is how you buy a second set of LEDs.
 
 ## Oscilloscope — when, and which
 

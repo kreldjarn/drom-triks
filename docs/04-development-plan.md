@@ -52,7 +52,12 @@ PCB, so it must be settled here.
 - **Then trigger over MIDI from a DAW** once a board exists, to play them in real time
 - Profile CPU per voice and record the numbers
 
-**Done when:** all eight voices sound good played from Ableton, and you know your CPU budget.
+**Done when:** all eight voices sound good played from Ableton, and you know your CPU budget —
+**measured on the H750, not on the host.** Every number in this repo so far comes from a native
+build on an ARM Mac: denormal handling, `-ffast-math` behaviour and SDRAM latency all differ on
+target, and a per-voice cost derived from a laptop is an estimate wearing a measurement's clothes.
+Re-run the envelope and timing checks on hardware and record the deltas; the "not CPU-bound"
+conclusion should survive, but it should survive a measurement rather than an assumption.
 
 ## Phase 3 — Sequencer core (~2–3 weeks)
 
@@ -104,7 +109,7 @@ otherwise.
 - Ground discipline: separate LED and audio ground pours, single star point at USB
 - **Include the analog-expansion reservations** from [doc 05](05-analog-expansion.md): barrel
   jack footprint, 2×12 header footprint (2×10 populated), 74HC595 trigger outputs, audio-in
-  jacks. $5.00 against a respin
+  jacks, trigger-out jacks. $9.00 against a respin
 - **Draw the cartridge carrier schematic too — but don't fab it.** It is the only way to find
   out the expansion header pinout is missing a signal while fixing it is still free rather than
   a respin. The carrier *board* waits until one analog voice exists on perfboard and you know
@@ -127,9 +132,22 @@ for it rather than being disappointed by it.
 
 **Done when:** you can power-cycle it and lose nothing.
 
+## What "done" means
+
+Phase 7 is a menu, and a menu is how a project like this quietly never ends. So, separately from
+the phases:
+
+> **v1 is done when you can write a pattern from scratch without looking at the screen, and you
+> catch yourself jamming instead of testing.**
+
+That is Phase 4's exit criterion promoted to the project's goal, because it is the only line here
+that describes an instrument rather than a feature. Everything in Phase 7 is something you add to
+a machine that is already finished — and if none of it ever happens, the project still succeeded.
+
 ## Phase 7 — Expansion
 
-Now that the instrument works, pick whichever of these you actually want. They're independent.
+Now that the instrument works, pick whichever of these you actually want. They're independent,
+and **none of them is required for v1 to be done.**
 
 - **Samples.** `SampleVoice : IVoice` drops into the existing array. SD card over SDMMC, streamed
   into SDRAM (64 MB ≈ 11 minutes of mono 48 kHz — you will not run out). Layer sample + synth per

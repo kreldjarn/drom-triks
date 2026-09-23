@@ -10,7 +10,9 @@ BUILD_DIR   := build
 # DaisySP's headers include each other by bare filename, so every source
 # directory has to be on the include path.
 INCLUDES := $(addprefix -I,$(shell find $(DAISYSP_DIR)/Source -type d))
-CXXFLAGS := -std=c++17 -O2 -Wall $(INCLUDES)
+# -pthread is for machinetest's real two-thread producer/consumer run. Apple
+# clang links std::thread without it; GCC on Linux does not, and CI is Linux.
+CXXFLAGS := -std=c++17 -O2 -Wall -pthread $(INCLUDES)
 
 # DaisySP is 40-odd files and never changes; build it once into an archive
 # rather than recompiling it for every target.

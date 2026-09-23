@@ -89,6 +89,15 @@ swing fall out for free — they're just offsets added to `trigger_delay`.
 Use **96 PPQN** internally (not 24). MIDI clock is 24 PPQN, so you divide cleanly on output,
 and 96 gives you 1/24-of-a-step micro-timing resolution to play with.
 
+**Gates need a second countdown, and it does not exist yet.** `trigger_delay` schedules the moment
+a hit *starts*; a digital voice then has an envelope and needs nothing more. A trigger output does:
+the 74HC595 bit has to be cleared again, and
+[doc 05 §4.5](05-analog-expansion.md#45-six-knobs-on-an-empty-slot) maps DECAY to gate width on an
+empty cartridge slot, so the width is a per-track value rather than a constant. That wants a
+`gate_remaining` counter alongside `trigger_delay`, decremented in the same per-sample loop and
+clearing the bit at zero. Worth building with the 595 driver rather than after it — retrofitting a
+second timebase into the sample loop is exactly the kind of change that reintroduces jitter.
+
 ## 4. Threading model
 
 Two contexts, one direction of ownership. The audio callback owns all sequencer and voice

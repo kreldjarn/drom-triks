@@ -85,6 +85,22 @@ Insurance so that adding analog circuitry later does not require a board respin.
 | 1 | 8-bit shift register (SIPO) | 74HC595 | $0.40 | $0.40 | Yes — 4 to cartridge slots, 4 to Eurorack |
 | — | 595 passives | — | — | $0.20 | Yes |
 | 2 | 3.5 mm audio-IN jack | PJ-320D | $1.00 | $2.00 | Yes — analog FX insert loop on day one |
+| 4 | 3.5 mm trigger-OUT jack | PJ-320D | $1.00 | $4.00 | Yes — the four 74HC595 lines not taken by cartridge slots. Without these the "drives Eurorack from power-on" claim is false |
+
+## Assembly
+
+Not optional and not free. **34 reverse-mount SK6812s sit on the opposite face from the switches**,
+which makes the board a two-sided reflow job and the hardest manufacturing step in the build. Price
+one of these two before ordering the PCB — the stencil in particular has to be ordered *with* the
+board, because it is cut to that board.
+
+| Route | Cost | Notes |
+| --- | ---: | --- |
+| **JLCPCB assembly, LED side only** | ~$40–70 + parts | They place and reflow the 34 LEDs; you hand-solder switches and through-hole. Removes the risk |
+| **Reflow them yourself** | ~$40 | SMD hotplate ~$25–40, stencil + paste ~$15 |
+
+Hand-soldering reverse-mount LEDs with an iron is not a third option — it is how you buy a second
+set of LEDs. Detail in [07-test-equipment.md](07-test-equipment.md#for-pcb-bring-up-phase-5).
 
 ## Totals
 
@@ -97,10 +113,10 @@ Insurance so that adding analog circuitry later does not require a board respin.
 | Audio output | $10.00 |
 | MIDI | $5.10 |
 | Power and misc | $26.70 |
-| Analog expansion reservations | $5.00 |
-| **Total (v1, first unit)** | **≈ $224** |
+| Analog expansion reservations | $9.00 |
+| **Total (v1, first unit)** | **≈ $228** |
 | *less one-time tooling (ST-Link, passives assortment, 4 spare PCBs)* | *−$57* |
-| **Marginal cost of a second unit** | **≈ $167** |
+| **Marginal cost of a second unit** | **≈ $171** |
 
 Budget **$250–300 all-in** for the first build. That covers a second PCB spin, which you will
 need, and the parts you'll destroy learning.
@@ -112,7 +128,7 @@ need, and the parts you'll destroy learning.
 | 1 | microSD push-push socket | $1.50 | $1.50 | Sample loading |
 | 1 | 8-channel I2S DAC (PCM1681) | $8.00 | $8.00 | Individual voice outputs |
 | 6 | 1/4" TS jack | $2.00 | $12.00 | Individual outs |
-| 4 | 3.5 mm jack + TL074 conditioning | $2.50 | $10.00 | CV/gate + analog clock in/out |
+| 4 | 3.5 mm jack + TL074 conditioning | $2.50 | $10.00 | CV **in** and analog clock conditioning (trigger **outs** moved to v1) |
 | 1 | Cartridge carrier, 4 slots | ~$42 | $42.00 | PCB, TCA9548A I²C switch, **3 × DAC8568 CV bank**, quad VCA, summing amp, ±12 V DC-DC, 4 edge sockets |
 | 1 | Analog voice cartridge (808-style BD) | ~$18 | $18.00 | [doc 10](10-cartridge.md): PCB with hard-gold fingers, shell, TL074/TL072/LM13700, ID EEPROM |
 | 1 | USB-A jack + 5 V load switch | $2.50 | $2.50 | USB MIDI host — **costs pins D29/D30**, keep them free in v1 |

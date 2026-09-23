@@ -1,0 +1,43 @@
+# Runs the six host suites on every push and PR.
+#
+# `make -C host test` deliberately excludes `play`, which is macOS-only
+# (CoreAudio), so the whole suite runs on a Linux runner. Only the DaisySP
+# submodule is needed — nothing under src/engine/ may include libDaisy, which
+# is what keeps this job cheap.
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  host-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - name: Build and run every suite
+        run: make -C host test
+
+      - name: Render a WAV, to prove the engine still runs end to end
+        run: make -C host run
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: pipx install ruff
+      - run: ruff check .
+
+# Not yet running the firmware build. It needs arm-none-eabi-gcc plus a full
+# `make libs` (libDaisy and its nested submodules), which is a slow job that
+# wants a cache and someone watching its first run. The steps are:
+#
+#   - uses: actions/checkout@v4
+#     with: { submodules: recursive }
+#   - uses: carlosperate/arm-none-eabi-gcc-action@v1
+#   - run: make libs && make
