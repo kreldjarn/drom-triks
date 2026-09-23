@@ -78,7 +78,7 @@ const std::vector<TrackDef> kSong = {
                            {ParamId::Snap, 0.90f}}},
               {9,  85, 0, {{ParamId::Tune, 0.30f}, {ParamId::Tone, 0.62f}}},
               {13, 98, 0, {{ParamId::Tune, 0.20f}, {ParamId::Tone, 0.44f},
-                           {ParamId::Snap, 0.80f}, {ParamId::Decay, 0.34f}}}}},
+                           {ParamId::Snap, 0.80f}, {ParamId::Decay, 0.55f}}}}},
 };
 
 Pattern BuildPattern()
@@ -195,11 +195,11 @@ int main(int argc, char **argv)
     set(OH, ParamId::Tone, 0.65f); set(OH, ParamId::Snap,  0.55f);
     set(OH, ParamId::Drive, 0.0f); set(OH, ParamId::Level, 0.45f);
 
-    set(LT, ParamId::Tune, 0.25f); set(LT, ParamId::Decay, 0.45f);
+    set(LT, ParamId::Tune, 0.25f); set(LT, ParamId::Decay, 0.62f);
     set(LT, ParamId::Tone, 0.55f); set(LT, ParamId::Snap,  0.50f);
     set(LT, ParamId::Drive, 0.25f); set(LT, ParamId::Level, 0.65f);
 
-    set(CP, ParamId::Tune, 0.45f); set(CP, ParamId::Decay, 0.35f);
+    set(CP, ParamId::Tune, 0.45f); set(CP, ParamId::Decay, 0.66f);
     set(CP, ParamId::Tone, 0.55f); set(CP, ParamId::Snap,  0.35f);
     set(CP, ParamId::Drive, 0.15f); set(CP, ParamId::Level, 0.55f);
 
@@ -209,7 +209,7 @@ int main(int argc, char **argv)
 
     // EFM territory: inharmonic ratio, high index that collapses fast, and
     // enough DRIVE for operator feedback plus a little bit reduction.
-    set(FM, ParamId::Tune, 0.30f); set(FM, ParamId::Decay, 0.18f);
+    set(FM, ParamId::Tune, 0.30f); set(FM, ParamId::Decay, 0.32f);
     set(FM, ParamId::Tone, 0.62f); set(FM, ParamId::Snap,  0.78f);
     set(FM, ParamId::Drive, 0.38f); set(FM, ParamId::Level, 0.55f);
 

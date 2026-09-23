@@ -182,6 +182,29 @@ separate knobs, and stacking them gives one usable sweep from clean to destroyed
 third of the downsample range is musical — DaisySP's `Decimator` maps its factor to a hold of up
 to 96 samples, which past about 0.3 is a buzz rather than a drum.
 
+### Two envelope mistakes worth not repeating
+
+Both of these made every custom voice sound like a sustained tone rather than a struck one, and
+neither shows up in a spectrum — only in the amplitude shape over time.
+
+**`AdEnv` defaults to a linear decay.** Real percussion decays roughly exponentially. A linear
+decay holds near full level and then drops, so a hit reads as a tone that cuts off. All four
+custom voices now call `SetCurve(-4)`, which puts the envelope near 35% a quarter of the way
+through its decay.
+
+**Decay time must be spread exponentially across the knob.** A linear map from 15 ms to 1.4 s
+puts the midpoint at 715 ms, so almost the whole range is "long" and every percussive setting is
+crammed into the first few degrees of travel. `DecayTime()` maps it as `0.02 · 60^v` — 20 ms at
+zero, ~155 ms at halfway, 1.2 s at full.
+
+With both fixed, an FM hit's RMS falls from 0.50 to silence in **70 ms** in a clean exponential
+curve. Before, it had only reached 0.20 after 190 ms.
+
+**The index envelope needs a floor.** Let it reach zero and the tail is a bare carrier sine — a
+noise attack followed by a beep, which is the least percussive thing this voice can do. A floor
+of 0.12 keeps real harmonic content in the tail: measured at a 268 Hz carrier, the tail shows
+9,740 Hz of zero crossings where a bare carrier would give about 540.
+
 **Index is in turns, not radians.** `FastSin` takes a 0..1 phase, so textbook FM indices of 0–9
 would mean nine whole cycles of phase modulation — noise at every setting rather than a tone.
 The first implementation had exactly that bug, and it showed up as a zero-crossing measurement

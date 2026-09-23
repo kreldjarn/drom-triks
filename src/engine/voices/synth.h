@@ -8,6 +8,25 @@
 
 namespace drom {
 
+/// AdEnv defaults to a LINEAR decay, which is wrong for percussion: it holds
+/// near full level and then drops, so a hit reads as a sustained tone that
+/// cuts off rather than as a strike. Real percussion decays roughly
+/// exponentially. Negative curve values give that; around -4 puts the envelope
+/// at ~35% a quarter of the way through its decay, which is what makes a hit
+/// sound struck.
+inline constexpr float kPercCurve = -4.f;
+
+/// Decay times spread exponentially, not linearly.
+///
+/// A linear map from 15 ms to 1.4 s puts the knob's midpoint at 715 ms, so
+/// most of its travel is "long" and the short, percussive settings are all
+/// crammed into the first few degrees. Exponential spacing matches how decay
+/// time is actually heard: 20 ms at zero, ~155 ms at halfway, 1.2 s at full.
+inline float DecayTime(float v)
+{
+    return 0.02f * powf(60.f, v);
+}
+
 /// Tom. A sine with a fast downward pitch sweep — the sweep is what separates a
 /// tom from a beep, and TONE controls how far it falls.
 class Tom : public VoiceBase
@@ -20,10 +39,12 @@ class Tom : public VoiceBase
         osc_.SetWaveform(daisysp::Oscillator::WAVE_SIN);
         amp_.Init(sr);
         amp_.SetTime(daisysp::ADENV_SEG_ATTACK, 0.001f);
+        amp_.SetCurve(kPercCurve);
         amp_.SetMax(1.f);
         amp_.SetMin(0.f);
         pitch_.Init(sr);
         pitch_.SetTime(daisysp::ADENV_SEG_ATTACK, 0.0005f);
+        pitch_.SetCurve(kPercCurve);
         pitch_.SetMax(1.f);
         pitch_.SetMin(0.f);
         Retime();
@@ -68,7 +89,7 @@ class Tom : public VoiceBase
   private:
     void Retime()
     {
-        amp_.SetTime(daisysp::ADENV_SEG_DECAY, 0.05f + param(ParamId::Decay) * 1.2f);
+        amp_.SetTime(daisysp::ADENV_SEG_DECAY, DecayTime(param(ParamId::Decay)));
         pitch_.SetTime(daisysp::ADENV_SEG_DECAY,
                        0.01f + (1.f - param(ParamId::Snap)) * 0.12f);
     }
@@ -92,10 +113,12 @@ class Clap : public VoiceBase
         burst_.Init(sr);
         burst_.SetTime(daisysp::ADENV_SEG_ATTACK, 0.0002f);
         burst_.SetTime(daisysp::ADENV_SEG_DECAY, 0.008f);
+        burst_.SetCurve(kPercCurve);
         burst_.SetMax(1.f);
         burst_.SetMin(0.f);
         tail_.Init(sr);
         tail_.SetTime(daisysp::ADENV_SEG_ATTACK, 0.002f);
+        tail_.SetCurve(kPercCurve);
         tail_.SetMax(1.f);
         tail_.SetMin(0.f);
         Retime();
@@ -154,7 +177,7 @@ class Clap : public VoiceBase
   private:
     void Retime()
     {
-        tail_.SetTime(daisysp::ADENV_SEG_DECAY, 0.06f + param(ParamId::Decay) * 0.5f);
+        tail_.SetTime(daisysp::ADENV_SEG_DECAY, DecayTime(param(ParamId::Decay)) * 0.6f);
     }
 
     daisysp::WhiteNoise noise_;
@@ -180,6 +203,7 @@ class RimShot : public VoiceBase
         bpf_.SetRes(0.8f);
         env_.Init(sr);
         env_.SetTime(daisysp::ADENV_SEG_ATTACK, 0.0002f);
+        env_.SetCurve(kPercCurve);
         env_.SetMax(1.f);
         env_.SetMin(0.f);
         Retune();
@@ -285,15 +309,21 @@ class FmVoice : public VoiceBase
         inv_sr_ = 1.f / sr;
         amp_.Init(sr);
         amp_.SetTime(daisysp::ADENV_SEG_ATTACK, 0.0004f);
+        amp_.SetCurve(kPercCurve);
         amp_.SetMax(1.f);
         amp_.SetMin(0.f);
         idx_.Init(sr);
         idx_.SetTime(daisysp::ADENV_SEG_ATTACK, 0.0002f);
+        idx_.SetCurve(kPercCurve);
         idx_.SetMax(1.f);
-        idx_.SetMin(0.f);
+        // The index floor is what stops the tail collapsing to a bare carrier
+        // sine. Without it a hit is a noise attack followed by a beep, which
+        // is the single most un-percussive thing this voice can do.
+        idx_.SetMin(0.12f);
         pitch_.Init(sr);
         pitch_.SetTime(daisysp::ADENV_SEG_ATTACK, 0.0002f);
         pitch_.SetTime(daisysp::ADENV_SEG_DECAY, 0.02f);
+        pitch_.SetCurve(kPercCurve);
         pitch_.SetMax(1.f);
         pitch_.SetMin(0.f);
         crush_.Init();
@@ -430,7 +460,7 @@ class FmVoice : public VoiceBase
 
     void Retime()
     {
-        amp_.SetTime(daisysp::ADENV_SEG_DECAY, 0.015f + param(ParamId::Decay) * 1.4f);
+        amp_.SetTime(daisysp::ADENV_SEG_DECAY, DecayTime(param(ParamId::Decay)));
         // The index envelope is always shorter than the amplitude envelope —
         // that ordering is what makes it read as a transient.
         idx_.SetTime(daisysp::ADENV_SEG_DECAY,
