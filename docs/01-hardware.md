@@ -297,38 +297,93 @@ supply makes the question moot. Worth knowing before someone "temporarily" raise
 debug an LED and browns out the codec.
 
 Analog cartridges never draw from this rail: the carrier makes its own ±12 V from VIN
-([doc 05 §6.1](05-analog-expansion.md#61-committed)). Keep the LED return current
+([doc 05 §6.1](05-analog-expansion.md#61-committed)).
+
+**A metal enclosure bonds to the star ground at exactly one point, and the jacks are where that
+goes wrong.** There are **twelve** of them — 2 line out, 1 headphone, 3 MIDI, 2 audio in, 4 trigger
+out. A metal-bushing jack bolted through a metal panel grounds its sleeve to the chassis, so twelve
+of those is twelve parallel ground paths and the result is hum that cannot be fixed without taking
+the instrument apart.
+
+The BOM is already right: **PJ-320D and PJ-612A are plastic-bodied PCB-mount**, so their sleeves
+stay isolated and the panel only needs clearance holes. Keep them. The Neutrik NMJ4HCD2 offered as
+an alternative in [doc 08](08-sourcing-sweden.md) has a metal bushing — a nicer jack, and the wrong
+choice here unless the chassis is deliberately designed as the ground plane.
+
+Keep the LED return current
 off the analog ground: **star-ground at the USB connector**, separate the LED ground pour from
 the audio ground pour, and join them at one point. 34 LEDs PWMing at audio rates into a shared
 ground plane is an audible buzz, and it is very hard to fix after layout.
 
 ## 5. Mechanical
 
-**v1:** the main PCB *is* the front panel — black soldermask, white silkscreen legends, switches
-mounted directly. Body is 3D-printed or laser-cut acrylic with standoffs. This costs nothing
-extra and looks intentional.
+**The panel is a 1.5 mm metal plate, and the switches mount into it.** That is a change from an
+earlier draft where the PCB itself was the front panel; it resolves the hot-swap socket problem
+below, and it is where the design is going anyway.
 
-**v2:** separate 1.5 mm aluminium panel over a PCB sandwich, once the layout is proven and you
-know you won't be moving a knob 2 mm to the left.
+### Board size — the number that sets everything else
 
-Switches: Cherry MX / Gateron with clear or translucent housings (the SMD LED cutout in the
-switch body is what the SK6812 shines through).
+**321 × 187 mm.** Worth stating plainly because an earlier BOM line said "~180 × 100 mm" and priced
+five 4-layer boards at $40, which is out by **3.3× in area** and much more in cost.
 
-**Hot-swap sockets and "the PCB is the panel" are in tension, and v1 picks the sockets.** Kailh
-sockets assume a plate takes the insertion force; with the switch soldered to nothing and the
-board unsupported, the socket's solder joints are the only retention and the board flexes on every
-swap. Two honest options:
+What sets the width is *not* the step keys, which is the intuitive answer and the wrong one:
 
-- **Add a plate.** A 1.5 mm FR4 or aluminium plate over the PCB, on standoffs — this is the v2
-  sandwich brought forward, and it costs the "the PCB is the panel" saving.
-- **Support the board locally.** Standoffs on a grid between the switch rows rather than only at
-  the corners, so the flex has nowhere to go. Cheaper, uglier, and enough at 34 switches.
+| Row | Width |
+| --- | ---: |
+| 16 step keys @ 19.05 mm | 304.8 mm |
+| **12 track keys** | **228.6 mm** ← the floor |
+| 6 macros + volume | 175.0 mm |
+| OLED + 2 nav encoders | 138.0 mm |
+| 6 transport keys | 114.3 mm |
 
-Doing neither makes the sockets worse than soldered switches, because they add a failure mode and
-buy a swap you won't risk performing.
+Two rows of 8 steps would narrow the board to 245 mm and make it taller, for a **16 %** area saving
+— not the halving you would guess, because the twelve track keys still have to fit. One row of 16
+is the x0x idiom, reads without counting, and costs very little more. **Don't re-litigate this at
+layout.**
 
-Pots: Alpha 9 mm vertical (RD901F) with Davies-1900-style knobs. Encoders: Bourns PEC11R with
-detents and a push switch.
+At either size the board is too large to panelise, so there is no assembly efficiency to recover
+there, and it sits in a pricing tier well above hobby sizes.
+
+### Build the plate in FR4 before you build it in metal
+
+The plate holds 34 switches, and its cutouts have to line up with 34 PCB footprints inside about
+0.2 mm. Order a **1.5 mm FR4 plate from the same PCB run** — same fab, same CAD, roughly $10 for
+five — and prove the geometry before anything is cut in aluminium:
+
+- 34 switch cutouts against 34 footprints
+- the plate-to-PCB standoff stack
+- encoder shaft and bushing length through panel plus gap
+- the OLED window
+
+FR4 is a legitimate MX plate material, not a mock-up, so the first units can ship on it. Metal is
+then a cosmetic and structural upgrade over a geometry already verified, rather than a $150 bet.
+
+### What the plate decides, before layout rather than after
+
+- **1.5 mm thickness is not a preference.** MX clip geometry is designed around it; thicker and the
+  clips do not engage.
+- **Plate-to-PCB spacing** (~5 mm for MX) sets the standoff height the layout has to allow for.
+- **Encoder shaft length** must clear panel plus gap. The PEC11R ships in several shaft and bushing
+  lengths, and ordering the wrong one costs a week for no good reason.
+- **The PCB stops needing a cosmetic finish.** Black soldermask and white silkscreen legends existed
+  to make the board presentable as a panel. Legends now go on the metal — engraved, screen-printed
+  or anodised.
+
+The LEDs are unaffected: the switch body passes through the plate cutout, so the SK6812 still
+shines up through the switch's own window into the keycap.
+
+### Hot-swap sockets now have the plate they assume
+
+Kailh sockets expect a plate to take the insertion force; with the switch soldered to nothing and
+the board unsupported, the socket's solder joints are the only retention and the board flexes on
+every swap. The plate solves that outright — it is how a mechanical keyboard is built, and it is
+why the sockets are worth having rather than a liability.
+
+Switches: Cherry MX / Gateron with clear or translucent housings (the SMD LED cutout in the switch
+body is what the SK6812 shines through), plate-mount.
+
+Pots: one Alpha 9 mm dual-gang (RD901F) for master volume, with a Davies-1900-style knob. Encoders:
+Bourns PEC11R with detents and a push switch.
 
 ## 6. Reservations for analog expansion
 
@@ -346,7 +401,7 @@ adding it later costs a board respin:
 | Stereo audio **input** jacks | $2.00 | Yes — the Seed3's unused audio input becomes an analog FX insert loop |
 | 4 × 3.5 mm trigger-**out** jacks | $4.00 | Yes — otherwise the eight trigger outputs reach an unpopulated header |
 
-**$9.00 against a $40 respin and three weeks of lead time.** The ±12 V generator itself belongs
+**$9.00 against a ~$175 respin and three weeks of lead time.** The ±12 V generator itself belongs
 on the carrier, not here — a switching converter next to the audio codec is a noise problem
 you'd be solving before there's any benefit.
 

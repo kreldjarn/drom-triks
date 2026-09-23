@@ -11,7 +11,8 @@ move. Re-cost before ordering.
 | 1 | Daisy Seed3 (with headers) | — | $29.99 | $29.99 | **Verified price.** 2×20 pin headers pre-soldered; JTAG pads bare |
 | 1 | 2×5 1.27 mm header, 10-pin | Amphenol 20021111-00010T4LF | $0.50 | $0.50 | JTAG pads ship bare; fit **centred** on the 14-position footprint |
 | 1 | ST-Link V3 MINIE | — | $12.00 | $12.00 | One-time tool cost; reusable |
-| 5 | Main PCB, 4-layer, ~180×100 mm | JLCPCB | $8.00 | $40.00 | 4-layer for the ground plane; qty 5 minimum |
+| 5 | Main PCB, 4-layer, **321×187 mm** | JLCPCB | ~$35 | $175.00 | Sized in [hardware §5](01-hardware.md#5-mechanical) — the 12 track keys set the width, not the 16 steps. Too large to panelise. **Get a real quote; this is an estimate** |
+| 5 | Switch plate, 1.5 mm FR4, same run | JLCPCB | $2.00 | $10.00 | Proves the 34-cutout geometry before anything is cut in metal |
 | 2 | 20-pin female header (Seed3 socket) | — | $1.00 | $2.00 | Socket it — do not solder the module down |
 
 ## Controls
@@ -70,7 +71,7 @@ plus 2 × 1 kΩ current-set resistors. Adds $3.50, removes RGB, removes timing r
 | — | Passives (R/C, 0805) | — | — | $5.00 | Buy an assortment book once |
 | 1 | Ferrite bead + bulk caps | — | $1.50 | $1.50 | USB rail filtering |
 | 8 | M3 standoff + screws | — | $0.40 | $3.20 | |
-| 1 | Enclosure body (3D print or laser-cut acrylic) | — | $12.00 | $12.00 | The PCB is the panel in v1 |
+| 1 | Enclosure, metal panel + body | — | ~$120 | $120.00 | 1.5 mm anodised aluminium, legended. Wide range at qty 1 — see [11-production.md §1](11-production.md#1-the-economics-change-shape-not-just-scale) |
 | 1 | USB-C cable | — | $5.00 | $5.00 | |
 
 ## Analog expansion reservations
@@ -106,20 +107,25 @@ set of LEDs. Detail in [07-test-equipment.md](07-test-equipment.md#for-pcb-bring
 
 | Section | Cost |
 | --- | ---: |
-| Core | $84.49 |
+| Core | $229.49 |
 | Controls | $69.00 |
 | LEDs and drivers | $6.78 |
 | Digital glue | $16.80 |
 | Audio output | $10.00 |
 | MIDI | $5.10 |
-| Power and misc | $26.70 |
+| Power and misc | $134.70 |
 | Analog expansion reservations | $9.00 |
-| **Total (v1, first unit)** | **≈ $228** |
-| *less one-time tooling (ST-Link, passives assortment, 4 spare PCBs)* | *−$57* |
-| **Marginal cost of a second unit** | **≈ $171** |
+| **Total (v1, first unit)** | **≈ $481** |
+| *less one-time tooling (ST-Link, passives assortment, 4 spare PCBs and plates)* | *−$205* |
+| **Marginal cost of a second unit** | **≈ $276** |
 
-Budget **$250–300 all-in** for the first build. That covers a second PCB spin, which you will
+Budget **$600–700 all-in** for the first build. That covers a second PCB spin, which you will
 need, and the parts you'll destroy learning.
+
+**This is a qty-1 number and it is the worst one you will ever pay.** At ~100 units the same
+instrument lands near **$140–170** — the PCB, panel and assembly all drop sharply, and the one-time
+tooling disappears entirely. [11-production.md](11-production.md) has the breakdown and the
+decisions that keep that option open.
 
 ## Deferred to v2
 
@@ -139,4 +145,5 @@ cards to the carrier, which is why the carrier got dearer and the cartridge chea
 cartridges are ~$18 each, less if panelised — see [doc 10 §6](10-cartridge.md#6-cost).*
 
 Leave footprints for the SD socket, the CV/expression jacks and the clock jacks on the v1 PCB
-even if you don't populate them. Unpopulated footprints are free; a board respin is $40 and three weeks.
+even if you don't populate them. Unpopulated footprints are free; a board respin is ~$175 for
+five and three weeks.

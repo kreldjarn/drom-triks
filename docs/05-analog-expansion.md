@@ -5,7 +5,7 @@ the expansion header, **additive to the eight digital voices** rather than repla
 machine with a full carrier is a 12-track instrument.
 
 Almost none of this needs building now — but a handful of items must be on the v1 PCB or you're
-buying a board respin ($40 and three weeks) to get them.
+buying a board respin (~$175 for five and three weeks) to get them.
 
 ## 1. Why cartridges, and why additive
 
