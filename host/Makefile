@@ -45,6 +45,12 @@ $(BUILD_DIR)/machinetest: machinetest.cpp $(ENGINE_HDRS) $(DSP_LIB)
 $(BUILD_DIR)/uxtest: uxtest.cpp $(ENGINE_HDRS) $(DSP_LIB)
 	$(CXX) $(CXXFLAGS) uxtest.cpp $(DSP_LIB) -o $@
 
+# macOS only: CoreAudio for output, no third-party dependencies.
+$(BUILD_DIR)/play: play.cpp $(ENGINE_HDRS) $(DSP_LIB)
+	$(CXX) $(CXXFLAGS) play.cpp $(DSP_LIB) -o $@ \
+	  -framework AudioToolbox -framework AudioUnit -framework CoreAudio \
+	  -framework CoreFoundation
+
 $(BUILD_DIR)/seqtest: seqtest.cpp $(ENGINE_HDRS)
 	@mkdir -p $(BUILD_DIR)
 	$(CXX) $(CXXFLAGS) seqtest.cpp -o $@
@@ -57,13 +63,14 @@ $(BUILD_DIR)/clocktest: clocktest.cpp $(ENGINE_HDRS)
 	@mkdir -p $(BUILD_DIR)
 	$(CXX) $(CXXFLAGS) clocktest.cpp -o $@
 
-.PHONY: seqtest locktest clocktest uitest machinetest uxtest
+.PHONY: seqtest locktest clocktest uitest machinetest uxtest play
 seqtest:     $(BUILD_DIR)/seqtest;     $<
 locktest:    $(BUILD_DIR)/locktest;    $<
 clocktest:   $(BUILD_DIR)/clocktest;   $<
 uitest:      $(BUILD_DIR)/uitest;      $<
 machinetest: $(BUILD_DIR)/machinetest; $<
 uxtest:      $(BUILD_DIR)/uxtest;      $<
+play:        $(BUILD_DIR)/play;        $<
 
 run: $(BUILD_DIR)/render
 	$(BUILD_DIR)/render $(BUILD_DIR)/out.wav

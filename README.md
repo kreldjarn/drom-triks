@@ -49,13 +49,24 @@ Full setup, including the toolchain and the bring-up checklist, in
 
 The voice engine and sequencer have no hardware dependency, so they build and run natively:
 
+**Play it on a Mac, right now:**
+
+```sh
+make -C host play
+```
+
+Real-time audio through CoreAudio, the keyboard standing in for the panel, and the LEDs drawn as
+truecolour blocks using the *same* renderers the firmware will use. Not a mock-up of the
+instrument — the instrument, with a different set of pins.
+
 ```sh
 make -C host run                      # renders host/build/out.wav
 afplay host/build/out.wav
 host/build/render out.wav --solo 4    # one voice alone, for tuning by ear
 host/build/render out.wav --trace     # exact sample each step fires on
 host/build/render --selftest          # voices must be silent until triggered
-make -C host test                     # sequencer, locks, and voice self-test
+make -C host test                     # every suite
+host/build/play --check               # verify audio opens, without a listener
 ```
 
 Macro values live at the top of `host/render.cpp` — that's where voice tuning happens.
