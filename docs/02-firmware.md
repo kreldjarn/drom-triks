@@ -94,15 +94,19 @@ and 96 gives you 1/24-of-a-step micro-timing resolution to play with.
 Two contexts, one direction of ownership. The audio callback owns all sequencer and voice
 state; the main loop owns the UI and never touches that state directly.
 
+**Three** contexts, one direction of ownership. The audio callback owns all sequencer and voice
+state; the main loop owns the UI and never touches that state directly; and a timer interrupt owns
+the panel scan, because neither of the other two runs fast enough for it.
+
 ```
-  main loop (1 kHz)                       audio callback (1.5 kHz)
-  ─────────────────                       ────────────────────────
-  scan keys/encoders at 10 kHz            drain command queue
-  run UI state machine       ──────►      advance clock
-  push UiCommand into SPSC ring           fire due steps
-                                          render 12 voices + FX
-  read AudioState (atomics)  ◄──────      publish AudioState
-  render LEDs + OLED
+  scan ISR (10 kHz)      main loop (1 kHz)              audio callback (1.5 kHz)
+  ─────────────────      ─────────────────              ────────────────────────
+  clock the CD4021s      read scan state                drain command queue
+  decode quadrature  ──► run UI state machine  ──────►  advance clock
+  accumulate detents     push UiCommand into ring       fire due steps
+  debounce keys @1 kHz                                  render 12 voices + FX
+                         read AudioState (atomics) ◄──  publish AudioState
+                         render LEDs + OLED
 ```
 
 - **UI → audio**: a lock-free single-producer/single-consumer ring buffer of `UiCommand`
@@ -111,8 +115,24 @@ state; the main loop owns the UI and never touches that state directly.
   the only writer.
 - **Audio → UI**: a small `AudioState` struct of relaxed atomics (current step, playing flag,
   per-voice envelope levels for meters). Stale by one block is fine for a display.
+- **Scan ISR → UI**: accumulated detent counts and debounced key state, read once per main-loop
+  pass. The ISR never pushes commands itself — it has no business knowing what a key means.
 
 Never allocate, never take a lock, never touch flash in the audio callback.
+
+### The scan ISR is a real context with real rules
+
+It exists because the encoders need 10 kHz ([hardware §3.2](01-hardware.md#32-keys-and-encoders--two-cd4021-chains))
+and the main loop runs at 1 kHz. Three things follow, none of them optional:
+
+- **It must be lower priority than the SAI DMA interrupt.** A 400 kHz bit-bang holding off the
+  audio transfer is a dropout, and it would be blamed on the DSP.
+- **Its interval is a parameter of the feel, not just of correctness.** `Ui::StepFor` derives
+  encoder step size from the time between detents, so jitter in the scan interval becomes jitter
+  in acceleration — a knob that feels different depending on what else the firmware is doing.
+  Drive it from a hardware timer, not from a counter in the main loop.
+- **The debouncer still runs at 1 kHz.** libDaisy's `Switch` tracks state per call, so the ISR
+  decimates: quadrature every pass, keys every tenth.
 
 ## 5. Voice engine
 
@@ -365,31 +385,41 @@ Two details that are easy to get wrong and unpleasant to debug:
 - Track key: hue = track identity; dim = has content; bright = selected; red = muted
 - An active step never renders below 25 % brightness, so velocity 1 is still visibly on
 
-**The renderer enforces the current budget.** Thirty SK6812s at full white draw **1.8 A**, far past
-any USB supply, and a per-LED clamp cannot see the total — only the whole frame knows the sum. So
-`LedRenderer` scales the entire frame if it would exceed **400 mA**, which leaves headroom on a
-500 mA port. The worst case the panel can actually produce measures **397 mA**.
+**The renderer enforces the current budget.** Thirty-four SK6812s at full white draw **2.0 A**, far
+past any USB supply, and a per-LED clamp cannot see the total — only the whole frame knows the sum.
+So `LedRenderer` scales the entire frame if it would exceed **400 mA**. The worst case the panel can
+actually produce measures **396 mA**.
 
 The screen *explains* — it shows the parameter name and value when you touch a knob, and the
 pattern overview otherwise. It never becomes the only way to reach a function. If a feature
 requires menu diving, it's mis-designed.
 
-**Soft takeover on pots is mandatory**, since six physical knobs address eight voices. When you
-switch tracks, the knob positions no longer match the stored values. Pickup mode: the parameter
-doesn't move until the knob crosses the stored value.
+**There is no soft takeover, because there are no pots.** Six knobs addressing twelve tracks would
+make a pot's physical position wrong the instant you change track, and the pickup behaviour that
+fixes it — the parameter stays put until the knob sweeps through the stored value — lands hardest
+on the p-lock gesture this whole data model exists for. Endless encoders have no position to
+disagree with, so `Ui` carries no pickup state at all and a lock is immediate. See the encoder
+notes above for what replaces it.
 
-The screen has to explain that, or the knob simply feels broken — you turn it, nothing happens,
-and nothing says why. While a pot is uncaught the display shows both positions and what to do:
+The screen shows the parameter, its value and a bar while a knob is turning, and says **LOCK** with
+the step number when that value is going to a step rather than to the track:
 
 ```
 BD   TUNE
-knob  25 ->  90
-turn to pick up
+LOCK step 7    52
+████████████░░░░░░░░
 ```
+
+Showing the track's value while locking would be actively misleading, so the display reads the
+in-flight edit value rather than the patch.
 
 ## 8. Persistence
 
-QSPI flash via libDaisy's `PersistentStorage`, laid out in slots.
+QSPI flash, laid out in slots. **Every number below is derived from `sizeof` in
+`src/io/storage_layout.h`, not written down here** — an earlier version of this table was
+hand-computed when tracks were 8, and when `Patch` grew from ~11.5 kB to 17.3 kB the 128 pattern
+slots silently overran their region by 112 kB into the songs area. The header now carries
+`static_asserts` for that, and the host test suite prints the map.
 
 **The app image lives in QSPI too, and user data must start above it.** Under `BOOT_SRAM` the
 image is staged at chip offset `0x40000` and can grow to the 480 kB SRAM limit, so the first
@@ -400,20 +430,47 @@ image is staged at chip offset `0x40000` and can grow to the 480 kB SRAM limit, 
 0x040000  app image     (480 kB)  staged here, copied to SRAM at boot
 0x0B8000  slack         (288 kB)
 ─────────────────────────────────  user data starts at the 1 MB mark
-0x100000  settings      (4 kB)    global config, calibration
-0x101000  kits          (256 kB)  32 kits × 8 voices × params
-0x141000  patterns      (2 MB)    128 patterns
-0x341000  songs         (64 kB)   pattern chains
-0x351000  free          (~4.7 MB) reserved for sample data
+0x100000  settings      (4 kB)      1 slot   × 4 kB
+0x101000  kits          (128 kB)    32 slots × 4 kB
+0x121000  patterns      (2.5 MB)    128 slots × 20 kB
+0x3A1000  songs         (64 kB)     16 slots × 4 kB
+0x3B1000  free          (~4.3 MB)   reserved for sample data
 ```
+
+**Slots are 4 kB-aligned, and that is a correctness requirement rather than tidiness.**
+`QSPIHandle::Erase` aligns its *start* address **down** to a 4 kB sector
+(`lib/libDaisy/src/per/qspi.cpp`), so a slot starting mid-sector means saving slot N erases the
+tail of slot N−1. `sizeof(Patch)` is 17,260 B, which rounds to a **20,480 B stride** — five
+sectors, 3.2 kB of it padding. Paying that is much cheaper than the alternative, and 128 slots
+still only occupy 2.5 MB of a chip with ~4.3 MB left over.
 
 `PersistentStorage::Init()` **defaults its offset to 0**, which would place settings directly on
-top of the app image — the first pattern save would corrupt the firmware executing that save.
-Always pass the offset explicitly:
+top of the app image — the first save would corrupt the firmware executing it. Always pass the
+offset explicitly:
 
 ```cpp
-storage.Init(defaults, 0x100000);   // never Init(defaults)
+storage.Init(defaults, kSettingsBase);   // never Init(defaults)
 ```
+
+### `PersistentStorage` is for settings only, never for a patch
+
+`PersistentStorage<T>` is the obvious vehicle for saving a patch and it must not be used for one.
+`StoreSettingsIfChanged()` declares its `SaveStruct` as a **stack local**
+(`lib/libDaisy/src/util/PersistentStorage.h`), and it keeps two more full copies of `T` as members.
+At `T = Patch` that is **17.3 kB of stack and 34.5 kB of `.bss`**.
+
+Under `STM32H750IB_sram.lds` `.data`, `.bss`, the heap and the stack all share the **128 kB
+DTCM**, and the script defines **no `_Min_Stack_Size`** — so there is nothing for the link to fail
+against. A stack overflow there quietly scribbles over `.bss` instead, which is the same class of
+fault the "`Machine` is never a stack local" rule exists to prevent, arriving via a library.
+
+So:
+
+- **Settings** — small, fixed, compared with `operator!=` — keep `PersistentStorage`.
+- **Patterns and kits** — write through `QSPIHandle::Erase`/`Write` against a **static staging
+  buffer**, one `Patch`-sized object owned by the storage module. It is already the shape the
+  rest of the firmware uses, and the copy has to exist somewhere regardless; putting it in `.bss`
+  deliberately is the difference between a known 17 kB and an invisible one.
 
 ### Why not a ValueTree
 
@@ -423,9 +480,10 @@ automation, thread-safe parameter passing from a GUI thread, undo, dynamic param
 and it brings observers, pointer chasing and allocation, all of which are hostile to an audio
 callback that must not allocate.
 
-Meanwhile `Pattern` is **trivially copyable**, so saving really is a `memcpy` and
-`PersistentStorage<Patch>` works as-is. A tree would mean writing a serialiser to get back to
-where we already are.
+Meanwhile `Pattern` is **trivially copyable**, so saving really is a `memcpy`. A tree would mean
+writing a serialiser to get back to where we already are. (What does *not* follow is that
+`PersistentStorage<Patch>` will do the writing — see above for why a 17 kB `T` is the wrong shape
+for it.)
 
 Two things a ValueTree *would* have given us are worth taking on their own:
 
@@ -444,8 +502,8 @@ struct SaveHeader { uint32_t magic; uint16_t version; uint16_t payload_size; };
 
 On load, a mismatch is **rejected, never reinterpreted**; the caller falls back to defaults.
 
-A **patch** is a `Pattern` plus a `Kit` — the sequence and the eight voices' base parameter
-values. Held separately because a kit is worth reusing across patterns.
+A **patch** is a `Pattern` plus a `Kit` — the sequence and all twelve tracks' base parameter
+values. Kits also get their own slots, because a kit is worth reusing across patterns.
 
 **Do flash writes from the main loop, never the audio callback**, and prefer to write on an
 explicit save action rather than autosaving during playback. With `BOOT_SRAM` a QSPI write

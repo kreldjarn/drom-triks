@@ -11,6 +11,7 @@
 #include <thread>
 #include <vector>
 
+#include "../src/io/storage_layout.h"
 #include "../src/machine.h"
 #include "../src/ui/ui.h"
 
@@ -109,6 +110,27 @@ int main()
 
         Check(received == kTotal, "every command arrives exactly once");
         Check(ordered, "and in order, with no tearing");
+    }
+
+    std::printf("\nQSPI storage layout:\n");
+    {
+        // The static_asserts in storage_layout.h are the real guard; this
+        // prints the map so a struct change that moves everything is visible
+        // in the test output rather than only at the next flash write.
+        std::printf("      sector %u B, Patch %zu B -> stride %u B (%u sectors)\n",
+                    kSectorBytes, sizeof(Patch), kPatternStride,
+                    kPatternStride / kSectorBytes);
+        std::printf("      settings 0x%06X  kits 0x%06X  patterns 0x%06X\n",
+                    kSettingsBase, kKitBase, kPatternBase);
+        std::printf("      songs    0x%06X  free 0x%06X  (chip 0x%06X)\n",
+                    kSongBase, kFreeBase, kQspiBytes);
+
+        Check(kPatternStride >= sizeof(Patch), "a pattern slot holds a whole Patch");
+        Check(kPatternStride % kSectorBytes == 0,
+              "slots are sector-aligned, so Erase cannot reach into the slot below");
+        Check(kFreeBase <= kQspiBytes, "the whole layout fits the chip");
+        Check(PatternAddr(kPatternSlots - 1) + kPatternStride == kSongBase,
+              "the last pattern slot ends exactly where songs begin");
     }
 
     std::printf("\nUI -> queue -> audio:\n");

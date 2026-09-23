@@ -21,6 +21,8 @@
 #include "daisy_seed.h"
 #include "daisysp.h"
 
+#include "io/storage_layout.h"
+
 using namespace daisy;
 using namespace daisysp;
 
@@ -36,7 +38,10 @@ static Oscillator osc;
 // PersistentStorage defaults this offset to 0, which would put user data on top
 // of the app image: the first pattern save would corrupt the firmware that was
 // executing the save. Never take the default here.
-static constexpr uint32_t kUserDataOffset = 0x100000;
+//
+// Taken from the shared layout rather than written again, so including it also
+// compiles that header's static_asserts into the firmware build.
+static constexpr uint32_t kUserDataOffset = drom::kSettingsBase;
 
 // Guards against reading a stale or never-initialised struct as valid settings.
 static constexpr uint32_t kSettingsMagic = 0x44524F4D;  // 'DROM'
