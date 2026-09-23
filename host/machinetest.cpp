@@ -116,12 +116,13 @@ int main()
         static Machine m; m.Init(48000.f);
         Ui ui; ui.Init(&m);
 
-        ui.PotMove(0, 0.5f);          // catch
-        ui.PotMove(0, 0.77f);
-        Check(std::fabs(m.patch().kit.params[0][0] - 0.5f) < 1e-5f,
+        const float before = m.patch().kit.params[0][0];
+        ui.SetTime(1000);
+        ui.EncoderTurn(0, +4);
+        Check(std::fabs(m.patch().kit.params[0][0] - before) < 1e-5f,
               "a UI edit does NOT take effect before the audio side runs");
         Pump(m);
-        Check(std::fabs(m.patch().kit.params[0][0] - 0.77f) < 1e-5f,
+        Check(m.patch().kit.params[0][0] > before,
               "and does take effect once it drains the queue");
     }
 

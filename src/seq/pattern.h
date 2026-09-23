@@ -14,8 +14,19 @@ inline constexpr int kPpqn = 96;
 /// 120 BPM, which is the granularity that makes a groove sit differently.
 inline constexpr int kTicksPerStep = kPpqn / 4;
 
-inline constexpr int kMaxSteps  = 64;
-inline constexpr int kNumTracks = 8;
+inline constexpr int kMaxSteps = 64;
+
+/// Eight digital voices plus four analog cartridge slots.
+///
+/// The cartridge tracks are additive, not substitutions: they exist in the
+/// sequencer whether or not a carrier board is attached, so their steps, locks
+/// and micro-timing drive the trigger outputs for external gear on their own,
+/// and an unpopulated slot is simply a silent track. Making them conditional
+/// would mean a pattern meaning different things depending on what is plugged
+/// in. See docs/05-analog-expansion.md §1.
+inline constexpr int kNumDigitalVoices  = 8;
+inline constexpr int kNumCartridgeSlots = 4;
+inline constexpr int kNumTracks = kNumDigitalVoices + kNumCartridgeSlots;
 
 /// Micro-timing is capped at just under one step in each direction. Beyond
 /// that "which step is this" stops being answerable — a step pushed a full

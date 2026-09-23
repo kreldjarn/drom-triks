@@ -5,11 +5,16 @@
 
 namespace drom {
 
-inline constexpr int kNumPots      = 6;
-inline constexpr int kNumStepKeys  = 16;
+/// Six macro encoders, one per ParamId. The two navigation encoders
+/// (value/tempo, nav/page) are separate and do not address parameters.
+inline constexpr int kNumMacros   = 6;
+inline constexpr int kNumStepKeys = 16;
 
-/// Panel state machine. Pure logic: it takes debounced key edges and pot
-/// positions and emits Commands. No hardware, no drawing — which is what lets
+static_assert(kNumMacros == static_cast<int>(ParamId::Count),
+              "one macro encoder per parameter");
+
+/// Panel state machine. Pure logic: it takes debounced key edges and encoder
+/// detents and emits Commands. No hardware, no drawing — which is what lets
 /// the whole interaction model be tested headless, before a panel exists.
 ///
 /// It never writes the patch. The audio side is the sole writer of pattern,
@@ -35,12 +40,11 @@ class Ui
         selected_track_ = 0;
         held_step_      = -1;
         shift_          = false;
-        // Nothing is caught until a knob is moved: on power-up the physical
-        // positions bear no relation to the loaded patch.
-        for(int i = 0; i < kNumPots; ++i)
+        for(int i = 0; i < kNumMacros; ++i)
         {
-            caught_[i]   = false;
-            last_raw_[i] = -1.f;
+            edit_value_[i]   = 0.f;
+            last_turn_ms_[i] = 0;
+            turning_[i]      = false;
         }
     }
 
@@ -66,12 +70,15 @@ class Ui
             machine_->Push(c);
             return;
         }
+        // No pickup logic on a track change: an endless encoder has no
+        // physical position to strand, so the six macros simply address the
+        // new track's values from the next detent onward. The in-flight edit
+        // values must still be dropped, or a gesture continuing across the
+        // change would apply the old track's value to the new one.
         if(track != selected_track_)
         {
             selected_track_ = track;
-            // The knobs now point at a different voice's values, so every pot
-            // is stale until it is moved back through the stored position.
-            ReleaseAllPots();
+            EndGestures();
         }
     }
 
@@ -85,6 +92,10 @@ class Ui
         // release, and only if no lock was written. Otherwise writing a lock
         // would also flip the step off under your finger.
         wrote_lock_while_held_ = false;
+
+        // Entering lock mode changes what a macro edits, from the track's base
+        // to this step's lock, so any gesture in flight has to re-seed.
+        EndGestures();
     }
 
     void StepRelease(int step)
@@ -94,42 +105,52 @@ class Ui
         if(!wrote_lock_while_held_ && !shift_)
             ToggleStep(step);
         held_step_ = -1;
+        EndGestures();
     }
 
-    /// Raw pot position, 0..1, straight from the ADC.
-    void PotMove(int pot, float raw)
+    /// One or more detents on macro encoder `enc`. `delta` is signed detents
+    /// since the last call — normally +/-1, more if the scan coalesced a fast
+    /// spin.
+    ///
+    /// Endless encoders are why there is no soft-takeover machinery here: an
+    /// encoder has no physical position to disagree with the stored value, so
+    /// selecting a different track can never strand six knobs. That also makes
+    /// a p-lock immediate — hold a step and nudge, with no sweep to pick up
+    /// the value first.
+    void EncoderTurn(int enc, int delta)
     {
-        if(pot < 0 || pot >= kNumPots || !machine_)
+        if(enc < 0 || enc >= kNumMacros || !machine_ || delta == 0)
             return;
 
-        const ParamId id     = static_cast<ParamId>(pot);
-        const float   stored = StoredValue(id);
+        const ParamId id = static_cast<ParamId>(enc);
 
-        last_pot_    = pot;
-        last_pot_ms_ = now_ms_;
+        // Continue from what we last pushed if the knob is still being turned,
+        // rather than re-reading the patch. The command queue is drained by the
+        // audio side a block later, so a fast spin would otherwise keep reading
+        // a stale value and silently drop detents.
+        //
+        // The first detent of a gesture is always fine and always re-seeds from
+        // the patch. Without the `turning_` guard a turn at now_ms_ == 0 would
+        // see a zero interval, read as a fast spin, and start from zero instead
+        // of the stored value.
+        const bool continuing
+            = turning_[enc] && (now_ms_ - last_turn_ms_[enc] <= kEditContinueMs);
 
-        // Soft takeover (pickup). Six knobs address eight voices, so after a
-        // track change the physical position is meaningless. The parameter
-        // stays put until the knob passes through the stored value, which
-        // stops a track change from jumping six parameters at once.
-        if(!caught_[pot])
-        {
-            const float prev = last_raw_[pot];
-            const bool  crossed
-                = prev >= 0.f && ((prev <= stored && raw >= stored)
-                                  || (prev >= stored && raw <= stored));
-            if(crossed || std::fabs(raw - stored) <= kCatchTolerance)
-                caught_[pot] = true;
-        }
-        last_raw_[pot] = raw;
+        float v = continuing ? edit_value_[enc] : CurrentValue(id);
+        v += delta * (continuing ? StepFor(enc) : kFineStep);
+        if(v < 0.f) v = 0.f;
+        if(v > 1.f) v = 1.f;
 
-        if(!caught_[pot])
-            return;
+        edit_value_[enc]   = v;
+        last_turn_ms_[enc] = now_ms_;
+        turning_[enc]      = true;
+        last_macro_        = enc;
+        last_macro_ms_     = now_ms_;
 
         Command c;
         c.track = static_cast<uint8_t>(selected_track_);
-        c.param = static_cast<uint8_t>(pot);
-        c.value = raw;
+        c.param = static_cast<uint8_t>(enc);
+        c.value = v;
         if(held_step_ >= 0)
         {
             c.type = Command::Type::SetStepLock;
@@ -149,21 +170,22 @@ class Ui
     int  selected_track() const { return selected_track_; }
     int  held_step() const { return held_step_; }
     bool shift() const { return shift_; }
-    bool pot_caught(int pot) const { return pot >= 0 && pot < kNumPots && caught_[pot]; }
 
     float value(ParamId id) const { return StoredValue(id); }
 
-    /// Which pot was touched most recently, and how long ago. The display uses
-    /// this to explain the knob you are actually holding.
-    int      last_pot() const { return last_pot_; }
-    uint32_t since_last_pot_ms() const { return now_ms_ - last_pot_ms_; }
-
-    /// Where the knob physically sits, which after a track change may be a
-    /// long way from the stored value.
-    float last_raw(int pot) const
+    /// The value this macro last pushed — what the screen should show while the
+    /// knob is being turned. Reading the patch instead would lag by a block,
+    /// and when locking a step it would show the track's value rather than the
+    /// step's, which is the opposite of what you are editing.
+    float edit_value(int enc) const
     {
-        return (pot >= 0 && pot < kNumPots) ? last_raw_[pot] : 0.f;
+        return (enc >= 0 && enc < kNumMacros) ? edit_value_[enc] : 0.f;
     }
+
+    /// Which macro was turned most recently, and how long ago. The display
+    /// uses this to explain the knob you are actually holding.
+    int      last_macro() const { return last_macro_; }
+    uint32_t since_last_macro_ms() const { return now_ms_ - last_macro_ms_; }
 
     bool step_active(int step) const
     {
@@ -182,7 +204,48 @@ class Ui
     }
 
   private:
-    static constexpr float kCatchTolerance = 0.02f;
+    /// How long a macro keeps accumulating from its own last value rather than
+    /// re-reading the patch. Only has to outlive the queue round-trip.
+    static constexpr uint32_t kEditContinueMs = 250;
+
+    // Acceleration. A detented encoder gives ~24 steps per revolution, so a
+    // single fixed step size is either too coarse to tune a parameter or needs
+    // ten revolutions to cross its range. The interval between detents picks
+    // the step instead: a deliberate click is fine, a spin is coarse.
+    static constexpr float kFineStep   = 1.f / 256.f; ///< ~10 turns end to end
+    static constexpr float kMidStep    = 1.f / 64.f;  ///< ~3 turns
+    static constexpr float kCoarseStep = 1.f / 16.f;  ///< ~2/3 of a turn
+
+    /// Drops every in-flight gesture, so the next detent re-seeds from the
+    /// patch. Called whenever what a macro points at changes.
+    void EndGestures()
+    {
+        for(int i = 0; i < kNumMacros; ++i)
+            turning_[i] = false;
+    }
+
+    float StepFor(int enc) const
+    {
+        const uint32_t dt = now_ms_ - last_turn_ms_[enc];
+        if(dt <= 8)  return kCoarseStep;
+        if(dt <= 25) return kMidStep;
+        return kFineStep;
+    }
+
+    /// What a nudge starts from. Holding a step that already carries a lock for
+    /// this parameter continues from the lock, not from the track value —
+    /// otherwise re-tweaking a locked step would jump it back to the base first.
+    float CurrentValue(ParamId id) const
+    {
+        if(held_step_ >= 0 && held_step_ < kMaxSteps)
+        {
+            const Step &s = CurrentTrack().steps[held_step_];
+            for(uint8_t i = 0; i < s.lock_count; ++i)
+                if(s.locks[i].param_id == static_cast<uint8_t>(id))
+                    return s.locks[i].as_float();
+        }
+        return StoredValue(id);
+    }
 
     bool Valid(int step) const { return machine_ && step >= 0 && step < kNumStepKeys; }
 
@@ -196,12 +259,6 @@ class Ui
         return machine_->patch().kit.params[selected_track_][static_cast<int>(id)];
     }
 
-    void ReleaseAllPots()
-    {
-        for(int i = 0; i < kNumPots; ++i)
-            caught_[i] = false;
-    }
-
     void ToggleStep(int step)
     {
         Command c;
@@ -211,17 +268,18 @@ class Ui
         machine_->Push(c);
     }
 
-    Machine *machine_     = nullptr;
-    Mode     mode_        = Mode::Play;
-    uint32_t now_ms_      = 0;
-    uint32_t last_pot_ms_ = 0;
-    int      last_pot_    = -1;
+    Machine *machine_       = nullptr;
+    Mode     mode_          = Mode::Play;
+    uint32_t now_ms_        = 0;
+    uint32_t last_macro_ms_ = 0;
+    int      last_macro_    = -1;
     int    selected_track_ = 0;
     int    held_step_      = -1;
     bool   shift_          = false;
     bool   wrote_lock_while_held_ = false;
-    bool   caught_[kNumPots]   = {};
-    float  last_raw_[kNumPots] = {};
+    float    edit_value_[kNumMacros]   = {};
+    uint32_t last_turn_ms_[kNumMacros] = {};
+    bool     turning_[kNumMacros]      = {};
 };
 
 } // namespace drom

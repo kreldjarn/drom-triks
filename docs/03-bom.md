@@ -18,21 +18,21 @@ move. Re-cost before ordering.
 
 | Qty | Part | Example P/N | Unit | Ext | Notes |
 | ---: | --- | --- | ---: | ---: | --- |
-| 6 | 9 mm vertical pot, B10k | Alpha RD901F | $1.20 | $7.20 | Linear taper; log tapers are wrong for macro params |
-| 6 | Knob, Davies 1900 style | — | $1.50 | $9.00 | |
-| 2 | Rotary encoder w/ switch, 24 detent | Bourns PEC11R-4215F-S0024 | $2.50 | $5.00 | Direct to GPIO, not the shift register |
-| 2 | Encoder knob | — | $1.50 | $3.00 | |
-| 30 | MX-compatible switch, clear housing | Gateron KS-9 clear | $0.40 | $12.00 | Clear top so the LED reaches the cap |
-| 30 | Hot-swap socket | Kailh MX | $0.10 | $3.00 | Worth it — changes switch feel without desoldering a legended panel |
-| 30 | Translucent keycap, DSA/XDA blank | — | $0.50 | $15.00 | Legends go on the PCB silkscreen |
+| 8 | Rotary encoder w/ switch, 24 detent | Bourns PEC11R-4215F-S0024 | $2.50 | $20.00 | 6 macro + 2 nav. On the 10 kHz CD4021 chain, not GPIO — pick on feel in Phase 1 |
+| 8 | Encoder knob | — | $1.50 | $12.00 | |
+| 1 | 9 mm dual-gang pot, B10k | Alpha RD901F-40-20R1-B10K (2-gang) | $1.50 | $1.50 | **Master volume, analog output path only** — not wired to the MCU |
+| 1 | Knob, Davies 1900 style | — | $1.50 | $1.50 | Distinct from the encoder knobs; it is a different kind of control |
+| 34 | MX-compatible switch, clear housing | Gateron KS-9 clear | $0.40 | $13.60 | Clear top so the LED reaches the cap |
+| 34 | Hot-swap socket | Kailh MX | $0.10 | $3.40 | Worth it — changes switch feel without desoldering a legended panel |
+| 34 | Translucent keycap, DSA/XDA blank | — | $0.50 | $17.00 | Legends go on the PCB silkscreen |
 
 ## LEDs and drivers
 
 | Qty | Part | Example P/N | Unit | Ext | Notes |
 | ---: | --- | --- | ---: | ---: | --- |
-| 30 | RGB LED, reverse-mount | SK6812 MINI-E | $0.15 | $4.50 | Fits under an MX switch |
+| 34 | RGB LED, reverse-mount | SK6812 MINI-E | $0.15 | $5.10 | Fits under an MX switch |
 | 1 | Level shifter, 3.3 V → 5 V | 74AHCT125 | $0.50 | $0.50 | **Not optional** — see hardware §3.4 |
-| 30 | 100 nF X7R 0805 | — | $0.02 | $0.60 | One per LED |
+| 34 | 100 nF X7R 0805 | — | $0.02 | $0.68 | One per LED |
 | 1 | 1000 µF 6.3 V electrolytic | — | $0.50 | $0.50 | LED rail bulk |
 
 *Fallback option if the SK6812 DMA driver proves troublesome: 2 × TLC5947 @ ~$4.00 = $8.00,
@@ -42,8 +42,7 @@ plus 2 × 1 kΩ current-set resistors. Adds $3.50, removes RGB, removes timing r
 
 | Qty | Part | Example P/N | Unit | Ext | Notes |
 | ---: | --- | --- | ---: | ---: | --- |
-| 2 | 8:1 analog mux | CD4051BE | $0.60 | $1.20 | One populated, one for expansion |
-| 4 | 8-bit shift register (PISO) | CD4021BE | $0.60 | $2.40 | libDaisy has a stock driver for the 4021 |
+| 8 | 8-bit shift register (PISO) | CD4021BE | $0.60 | $4.80 | Two chains: 5 for 34 keys, 3 for 8 encoders + push |
 | 1 | OLED 2.42" 128×64 SPI | SSD1309 module | $12.00 | $12.00 | 0.96" SSD1306 is $4 and too small to read |
 
 ## Audio output
@@ -82,8 +81,8 @@ Insurance so that adding analog circuitry later does not require a board respin.
 | Qty | Part | Example P/N | Unit | Ext | Populate in v1? |
 | ---: | --- | --- | ---: | ---: | --- |
 | 1 | 2.1 mm DC barrel jack + 1N5819 Schottky | PJ-002A | $1.50 | $1.50 | Footprint only — analog needs ±12 V |
-| 1 | 2x10 2.54 mm header | — | $0.80 | $0.80 | Yes |
-| 1 | 8-bit shift register (SIPO) | 74HC595 | $0.40 | $0.40 | Yes — 8 trigger outs, drives external gear now |
+| 1 | 2x12 2.54 mm header | — | $0.90 | $0.90 | 2x10 positions populated; 2 spare pending the SAI2 check in doc 05 §6.2 |
+| 1 | 8-bit shift register (SIPO) | 74HC595 | $0.40 | $0.40 | Yes — 4 to cartridge slots, 4 to Eurorack |
 | — | 595 passives | — | — | $0.20 | Yes |
 | 2 | 3.5 mm audio-IN jack | PJ-320D | $1.00 | $2.00 | Yes — analog FX insert loop on day one |
 
@@ -92,16 +91,16 @@ Insurance so that adding analog circuitry later does not require a board respin.
 | Section | Cost |
 | --- | ---: |
 | Core | $84.49 |
-| Controls | $54.20 |
-| LEDs and drivers | $6.10 |
-| Digital glue | $15.60 |
+| Controls | $69.00 |
+| LEDs and drivers | $6.78 |
+| Digital glue | $16.80 |
 | Audio output | $10.00 |
 | MIDI | $5.10 |
 | Power and misc | $26.70 |
-| Analog expansion reservations | $4.90 |
-| **Total (v1, first unit)** | **≈ $207** |
+| Analog expansion reservations | $5.00 |
+| **Total (v1, first unit)** | **≈ $224** |
 | *less one-time tooling (ST-Link, passives assortment, 4 spare PCBs)* | *−$57* |
-| **Marginal cost of a second unit** | **≈ $150** |
+| **Marginal cost of a second unit** | **≈ $167** |
 
 Budget **$250–300 all-in** for the first build. That covers a second PCB spin, which you will
 need, and the parts you'll destroy learning.
@@ -114,9 +113,14 @@ need, and the parts you'll destroy learning.
 | 1 | 8-channel I2S DAC (PCM1681) | $8.00 | $8.00 | Individual voice outputs |
 | 6 | 1/4" TS jack | $2.00 | $12.00 | Individual outs |
 | 4 | 3.5 mm jack + TL074 conditioning | $2.50 | $10.00 | CV/gate + analog clock in/out |
-| 1 | Analog voice daughterboard (BD + SD + output filter) | ~$60 | $60.00 | PCB, DAC8568 CV DAC, ±12 V DC-DC, discrete voice circuits |
+| 1 | Cartridge carrier, 4 slots | ~$42 | $42.00 | PCB, TCA9548A I²C switch, **3 × DAC8568 CV bank**, quad VCA, summing amp, ±12 V DC-DC, 4 edge sockets |
+| 1 | Analog voice cartridge (808-style BD) | ~$18 | $18.00 | [doc 10](10-cartridge.md): PCB with hard-gold fingers, shell, TL074/TL072/LM13700, ID EEPROM |
 | 1 | USB-A jack + 5 V load switch | $2.50 | $2.50 | USB MIDI host — **costs pins D29/D30**, keep them free in v1 |
 | | **v2 add-on total** | | **$94.00** | |
 
-Leave footprints for the SD socket and the clock jacks on the v1 PCB even if you don't populate
-them. Unpopulated footprints are free; a board respin is $40 and three weeks.
+*Carrier and cartridge split changed once the cartridge was designed: the CV DACs moved from the
+cards to the carrier, which is why the carrier got dearer and the cartridge cheaper. Additional
+cartridges are ~$18 each, less if panelised — see [doc 10 §6](10-cartridge.md#6-cost).*
+
+Leave footprints for the SD socket, the CV/expression jacks and the clock jacks on the v1 PCB
+even if you don't populate them. Unpopulated footprints are free; a board respin is $40 and three weeks.

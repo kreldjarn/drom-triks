@@ -189,4 +189,20 @@ class VoiceBase : public IVoice
     float params_[static_cast<int>(ParamId::Count)] = {0.5f, 0.5f, 0.5f, 0.5f, 0.f, 0.8f};
 };
 
+/// An analog cartridge slot with nothing plugged into it.
+///
+/// Every track holds an IVoice unconditionally, so an empty slot needs a real
+/// object rather than a null pointer: VoiceSlot dereferences the voice every
+/// sample, and a null check there would cost more than this does. It still
+/// stores parameters, so knobs and p-locks behave identically whether or not
+/// hardware is present — the values simply go nowhere until an AnalogVoice
+/// takes this slot's place. See docs/05-analog-expansion.md §4.1.
+class EmptySlot : public VoiceBase
+{
+  public:
+    void  Init(float) override {}
+    void  Trigger(float) override {}
+    float Process() override { return 0.f; }
+};
+
 } // namespace drom

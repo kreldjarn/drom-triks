@@ -45,13 +45,13 @@ bring the board up:
 | --- | --- |
 | `power` | USB-C in, 5 V rail, bulk/decoupling, DC jack footprint, star ground point |
 | `daisy` | The Seed3 + its headers, JTAG header, boot/reset |
-| `controls` | 6 pots → CD4051, second CD4051 footprint |
-| `keys` | 4 × CD4021 chain, 30 switches + hot-swap sockets, encoders |
+| `controls` | 8 encoders → 3 × CD4021, master volume pot in the audio path, CV jack footprints |
+| `keys` | 5 × CD4021 chain, 34 switches + hot-swap sockets |
 | `leds` | 74AHCT125 level shifter, SK6812 chain, per-LED decoupling |
 | `display` | SSD1309 OLED header |
 | `midi` | H11L1 in, 74HCT14 out + thru, three TRS jacks |
 | `audio` | Output stage, headphone amp, jacks, audio **in** jacks |
-| `expansion` | 2×10 header, 74HC595 trigger outs |
+| `expansion` | 2×12 header footprint (2×10 populated), 74HC595 trigger outs |
 
 Draw `power` and `daisy` first and get them right; everything else hangs off them.
 
@@ -68,7 +68,7 @@ look.
 
 - Use **net labels liberally** and global labels between sheets; wire-spaghetti across a design
   this size is unreadable and error-prone.
-- Name nets for what they are (`MUX_SEL0`, `KEY_LATCH`, `LED_DATA`), not where they go.
+- Name nets for what they are (`SR_CLK`, `ENC_DATA`, `LED_DATA`), not where they go.
 - Annotate (Tools → Annotate Schematic).
 - **Run ERC and get it to zero**, adding power flags where needed. Every real error you leave
   here becomes a cut trace and a bodge wire later.
@@ -77,14 +77,14 @@ look.
 
 - **Level shifter is not optional.** SK6812 at 5 V wants V_IH ≈ 3.5 V; the Seed3 drives 3.3 V.
   The 74AHCT125 goes between them ([hardware §3.4](01-hardware.md#34-leds--sk6812-chain-on-spidma)).
-- **LED current.** 30 × 60 mA is 1.8 A at full white — far past USB. Clamped in firmware, but the
+- **LED current.** 34 × 60 mA is 2.0 A at full white — far past USB. Clamped in firmware, but the
   rail and bulk cap (1000 µF) must still be drawn for the real peak.
 - **Ground split.** Separate analog and LED/digital ground pours joined at **one** star point near
-  USB. 30 LEDs PWMing into a shared ground plane is an audible buzz and very hard to fix after
+  USB. 34 LEDs PWMing into a shared ground plane is an audible buzz and very hard to fix after
   layout. Draw it as separate nets (`AGND` / `PGND`) now so layout can honour it.
 - **Analog expansion reservations** ([05-analog-expansion.md](05-analog-expansion.md)): DC barrel
-  jack footprint, 2×10 header, 74HC595, audio-in jacks. $4.90 against a respin.
-- **Unpopulated footprints are free**: SD socket, second CD4051, clock jacks. Draw them now.
+  jack footprint, 2×12 header footprint, 74HC595, audio-in jacks. $5.00 against a respin.
+- **Unpopulated footprints are free**: SD socket, CV/expression jacks, clock jacks. Draw them now.
 
 ## 6. Decide before layout, not during
 

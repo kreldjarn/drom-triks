@@ -43,7 +43,7 @@ constexpr UInt32 kMaxChunk = 2048;
 /// device without changing the system-wide setting.
 AudioDeviceID g_device = 0;
 
-// 15.5 kB — far too big for a stack frame, on a Mac as much as on an M7.
+// ~21.5 kB — far too big for a stack frame, on a Mac as much as on an M7.
 Machine         g_machine;
 Ui              g_ui;
 LedRenderer     g_leds;
@@ -67,11 +67,11 @@ constexpr size_t      kRecMinutes = 10;
 
 // --- keyboard layout, laid out like the panel it stands in for -------------
 const char *kStepKeys  = "1234567890qwerty"; // 16 steps
-const char *kTrackKeys = "asdfghjk";         // 8 tracks
+const char *kTrackKeys = "asdfghjkzxcv";     // 12 tracks: 8 digital, then C1-C4
 
-/// Which pot the -/= keys address. A terminal has no knobs, so one "focused"
-/// pot stands in for six physical ones.
-int g_sel_pot = 0;
+/// Which macro encoder the -/= keys address. A terminal has no knobs, so one
+/// "focused" encoder stands in for six physical ones.
+int g_sel_enc = 0;
 
 /// A terminal gives no key-up events, so "hold a step and turn a knob" has to
 /// become a latch: press l, then a step, and that step stays held until l again.
@@ -325,6 +325,13 @@ AudioUnit StartAudio()
 }
 
 // --- drawing ---------------------------------------------------------------
+
+/// Width of one panel cell, in terminal columns: a 2-column colour block plus
+/// one space. Every label row must use the same width or the letters walk out
+/// from under their blocks, one column per key — which at 16 steps puts the
+/// last label five columns adrift.
+constexpr int kCellCols = 3;
+
 void Block(Rgb c)
 {
     std::printf("\033[48;2;%d;%d;%dm  \033[0m", c.r, c.g, c.b);
@@ -356,7 +363,7 @@ void Draw(uint32_t now_ms)
     }
     std::printf("\n         ");
     for(int i = 0; i < kNumStepKeys; ++i)
-        std::printf("%c   ", kStepKeys[i]);
+        std::printf("%-*c", kCellCols, kStepKeys[i]);
 
     std::printf("\n\n  tracks ");
     for(int i = 0; i < kNumTracks; ++i)
@@ -366,22 +373,21 @@ void Draw(uint32_t now_ms)
     }
     std::printf("\n         ");
     for(int i = 0; i < kNumTracks; ++i)
-        std::printf("%c   ", kTrackKeys[i]);
+        std::printf("%-*c", kCellCols, kTrackKeys[i]);
     std::printf("\n         ");
     for(int i = 0; i < kNumTracks; ++i)
-        std::printf("%-4s", kTrackName[i]);
+        std::printf("%-*s", kCellCols, kTrackName[i]);
 
-    // Pots, with the selected one marked and pickup state made visible.
-    std::printf("\n\n  pots   ");
-    for(int i = 0; i < kNumPots; ++i)
+    // Macro encoders, with the selected one marked.
+    std::printf("\n\n  macros ");
+    for(int i = 0; i < kNumMacros; ++i)
     {
         const float v = g_machine.patch().kit.params[g_ui.selected_track()][i];
-        const bool  sel = (i == g_sel_pot);
-        std::printf("%s%-5s %3d%s%s  ",
+        const bool  sel = (i == g_sel_enc);
+        std::printf("%s%-5s %3d%s  ",
                     sel ? "\033[7m" : "",
                     ParamName(static_cast<ParamId>(i)),
                     static_cast<int>(v * 100.f + 0.5f),
-                    g_ui.pot_caught(i) ? "" : "*",
                     sel ? "\033[0m" : "");
     }
 
@@ -389,7 +395,7 @@ void Draw(uint32_t now_ms)
                 g_ui.mode() == Ui::Mode::Mute ? "[MUTE MODE] " : "",
                 g_lock_arm ? "[LOCK ARMED - press a step key] " : "",
                 g_ui.held_step() >= 0
-                    ? "[HOLDING STEP - adjust a pot to write a lock, l to finish]"
+                    ? "[HOLDING STEP - turn a macro to write a lock, l to finish]"
                     : "");
     if(g_recording.load())
         std::printf("  \033[1;31m* REC\033[0m  %.1f s\n",
@@ -545,18 +551,15 @@ int main(int argc, char **argv)
                                                              : Command::Type::Start;
                     g_machine.Push(c);
                     break;
-                case ',': g_sel_pot = (g_sel_pot + kNumPots - 1) % kNumPots; break;
-                case '.': g_sel_pot = (g_sel_pot + 1) % kNumPots; break;
+                case ',': g_sel_enc = (g_sel_enc + kNumMacros - 1) % kNumMacros; break;
+                case '.': g_sel_enc = (g_sel_enc + 1) % kNumMacros; break;
                 case '-':
                 case '=':
-                {
-                    const int   trk = g_ui.selected_track();
-                    const float cur = g_machine.patch().kit.params[trk][g_sel_pot];
-                    float       nv  = cur + (ch == '=' ? 0.05f : -0.05f);
-                    nv              = nv < 0.f ? 0.f : (nv > 1.f ? 1.f : nv);
-                    g_ui.PotMove(g_sel_pot, nv);
+                    // One detent per keypress. Acceleration keys off the
+                    // interval between them, so held autorepeat coarsens the
+                    // step exactly as a real spin would.
+                    g_ui.EncoderTurn(g_sel_enc, ch == '=' ? +1 : -1);
                     break;
-                }
                 case 'r':
                     if(g_recording.load())
                     {

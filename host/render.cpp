@@ -32,7 +32,8 @@ constexpr int    kBars       = 2;
 // Named TrackId, not Track: drom::Track is the pattern's track struct.
 enum TrackId { BD = 0, SD, CH, OH, LT, CP, RS, FM };
 
-const char *kNames[kNumTracks] = {"BD", "SD", "CH", "OH", "LT", "CP", "RS", "FM"};
+const char *kNames[kNumTracks]
+    = {"BD", "SD", "CH", "OH", "LT", "CP", "RS", "FM", "C1", "C2", "C3", "C4"};
 
 struct Lk
 {
@@ -128,8 +129,10 @@ int SelfTest()
     Tom lt; Clap cp; RimShot rs; FmVoice fm;
     IVoice *voices[] = {&bd, &sd, &ch, &oh, &lt, &cp, &rs, &fm};
 
+    // Digital voices only: an empty cartridge slot is silent by
+    // construction, so there is nothing here for it to fail.
     int failures = 0;
-    for(int v = 0; v < kNumTracks; ++v)
+    for(int v = 0; v < kNumDigitalVoices; ++v)
     {
         voices[v]->Init(kSampleRate);
         for(int pp = 0; pp < static_cast<int>(ParamId::Count); ++pp)
@@ -170,7 +173,13 @@ int main(int argc, char **argv)
 
     BassDrum bd; SnareDrum sd; ClosedHat ch; OpenHat oh;
     Tom lt; Clap cp; RimShot rs; FmVoice fm;
+    // Twelve slots, matching the firmware: the upper four are cartridge
+    // slots with nothing plugged in. Rendering the same shape the hardware
+    // runs is the point of this tool.
+    EmptySlot cart[kNumCartridgeSlots];
     IVoice   *voices[kNumTracks] = {&bd, &sd, &ch, &oh, &lt, &cp, &rs, &fm};
+    for(int i = 0; i < kNumCartridgeSlots; ++i)
+        voices[kNumDigitalVoices + i] = &cart[i];
     VoiceSlot slots[kNumTracks];
     for(int i = 0; i < kNumTracks; ++i)
         slots[i].Init(voices[i], kSampleRate);

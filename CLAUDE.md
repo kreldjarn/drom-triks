@@ -49,7 +49,7 @@ PB14/PB15, so it cannot move to other pins). Don't spend them without saying so.
 **Voices go through `IVoice`.** That interface is what makes sample playback and analog voices
 later additions rather than rewrites of the sequencer, mixer and UI. Don't bypass it.
 
-**`Machine` is ~15.5 kB — never a stack local.** It holds the patch (11.2 kB) plus voices and the
+**`Machine` is ~21.5 kB — never a stack local.** It holds the patch (16.9 kB) plus voices and the
 command queue. Declaring one as a local would overflow a typical embedded main stack. Hold it
 statically or as a member of something static, on the host as well, so the tests exercise the
 same shape the firmware uses.

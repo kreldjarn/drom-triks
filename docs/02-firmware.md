@@ -36,7 +36,7 @@ src/
   main.cpp              init, audio callback, 1 kHz control loop
   hw/
     board.h/.cpp        pin map; one Hardware struct owning every peripheral
-    controls.cpp        mux pot scan + smoothing + soft-takeover, key debounce, encoders
+    controls.cpp        10 kHz shift-register scan, quadrature decode, key debounce
     leds.cpp            SK6812 SPI-DMA driver + RGB frame buffer
     display.cpp         OLED page renderer
   engine/
@@ -97,10 +97,10 @@ state; the main loop owns the UI and never touches that state directly.
 ```
   main loop (1 kHz)                       audio callback (1.5 kHz)
   ─────────────────                       ────────────────────────
-  scan pots/keys/encoders                 drain command queue
+  scan keys/encoders at 10 kHz            drain command queue
   run UI state machine       ──────►      advance clock
   push UiCommand into SPSC ring           fire due steps
-                                          render 8 voices + FX
+                                          render 12 voices + FX
   read AudioState (atomics)  ◄──────      publish AudioState
   render LEDs + OLED
 ```
@@ -147,6 +147,23 @@ public:
 A `SampleVoice` implementing this same interface drops into the same array. The sequencer,
 p-locks, mixer and UI never learn that anything changed. Build this seam in Phase 2 even though
 samples are Phase 7 — retrofitting it later means touching every one of those subsystems.
+
+### Tracks 9–12 are analog cartridge slots
+
+The voice array is **12 entries**, not 8. The upper four are analog cartridges
+([doc 05](05-analog-expansion.md)) — additive to the digital voices rather than replacing them, so
+an empty slot is simply a silent track and there is no fallback logic anywhere.
+
+`AnalogVoice` is the third implementation of the same interface: `SetParam` stages a CV,
+`Trigger` flushes the staged CVs over SPI and latches a gate bit into the 74HC595, and `Process`
+returns zero because the audio comes back through the ADC input. The reason the CV write is on SPI
+rather than I²C is subtle and load-bearing — `VoiceSlot::ApplyLocks` runs at `delay_ == 0`, the same
+sample as the gate, so a bus too slow for the audio callback pushes every parameter lock 1–2 ms
+behind its own trigger. [Doc 05 §4.2](05-analog-expansion.md#42-why-the-bus-choice-decides-whether-p-locks-work)
+has the full argument.
+
+All twelve voices are statically allocated. `Machine` grows to 21.5 kB, which changes nothing
+about the rule that it is never a stack local.
 
 ### Percussive FM
 
@@ -255,12 +272,18 @@ struct Step {
 };                                              // 22 bytes
 
 struct Track  { Step steps[64]; uint8_t length; uint8_t speed; uint8_t direction; };
-struct Pattern{ Track tracks[8]; uint16_t bpm_x10; uint8_t swing; uint8_t kit_id; };
+struct Pattern{ Track tracks[12]; uint16_t bpm_x10; uint8_t swing; uint8_t kit_id; };
 ```
 
-**11.0 kB per pattern** (measured, not estimated — `ParamLock` aligns to 4 bytes, not 3, which
-takes `Step` to 22). 128 patterns is **1.38 MB** against the ~7 MB of writable QSPI, so there is
-no reason to pack the struct and pay for unaligned access.
+**11.0 kB per pattern** at 8 tracks (measured, not estimated — `ParamLock` aligns to 4 bytes, not
+3, which takes `Step` to 22); **16.6 kB** at 12. 128 patterns is **2.07 MB** against the ~7 MB of
+writable QSPI, so there is still no reason to pack the struct and pay for unaligned access.
+
+The four extra tracks are the analog cartridge slots. They carry steps, locks and micro-timing
+like any other track whether or not a cartridge is plugged in — which is what lets the trigger
+outputs drive external gear on their own, and what stops a pattern meaning something different
+depending on what's in the slots. **The slot map lives in the kit, not the pattern**, so a pattern
+loads and plays against whatever hardware is present.
 
 Per-track `length` and `speed` give polymeter for free: a 7-step hat track against a 16-step
 kick is one byte of state and the single highest ratio of musical interest to implementation
@@ -299,14 +322,38 @@ until the next unlocked step, and then jumps back to where it used to be.
 
 Modes, with `SHIFT` as a held modifier rather than a latched state:
 
-| Mode | 16 step keys | Pots |
+| Mode | 16 step keys | Macro encoders |
 | --- | --- | --- |
 | **PLAY** (default) | toggle steps on selected track | macros for selected track |
 | **hold a step key** | — | **write a p-lock** on that step |
 | **SHIFT + step** | step detail: velocity, micro, probability, ratchet | edit that step's params |
 | **MUTE** | — (track keys mute/unmute) | macros |
 | **PATTERN** | select / chain patterns | — |
-| **REC + play** | live record from track keys, quantise optional | live-record pot moves as locks |
+| **REC + play** | live record from track keys, quantise optional | live-record turns as locks |
+
+### Encoders delete the pickup problem and add an acceleration one
+
+Six knobs address twelve tracks, so a *pot's* physical position is wrong the instant you change
+track. That needed soft takeover — the parameter stays put until the knob sweeps through the
+stored value — plus a screen affordance explaining why the knob appeared dead. All of it is gone:
+an endless encoder has no position to disagree with, so `Ui` carries no `caught_` flags, no raw
+positions and no pickup state, and a p-lock is immediate rather than something you sweep into.
+
+What replaces it is **acceleration**, and it is not optional. A detented encoder gives ~24 steps
+per revolution, so one fixed step size is either too coarse to tune a parameter or needs ten
+revolutions to cross its range. `Ui::StepFor` picks the step from the interval between detents:
+a deliberate click is 1/256, a spin is 1/16.
+
+Two details that are easy to get wrong and unpleasant to debug:
+
+- **A gesture accumulates from its own last value, not from the patch.** The queue is drained a
+  block later, so re-reading the patch per detent would keep seeing a stale value and silently
+  drop most of a fast spin.
+- **The first detent of a gesture always re-seeds and is always fine.** Without that guard a turn
+  at `now_ms_ == 0` sees a zero interval, reads as a fast spin, and starts from zero rather than
+  from the stored value. Gestures are also dropped whenever what a macro points at changes — a
+  track change, or entering and leaving lock mode — or a gesture spanning the change would write
+  the old target's value to the new one.
 
 **LED language** — consistent enough to read without thinking:
 

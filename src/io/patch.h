@@ -6,7 +6,11 @@
 
 namespace drom {
 
-/// The eight voices' base parameter values — the "sound" half of a patch.
+/// Every track's base parameter values — the "sound" half of a patch.
+///
+/// The cartridge tracks carry parameters like any other, so a kit stays
+/// meaningful across a cartridge swap: the six macros are normalised, so a
+/// stored TUNE still means TUNE on whatever is plugged in.
 struct Kit
 {
     float params[kNumTracks][static_cast<int>(ParamId::Count)];
@@ -14,12 +18,19 @@ struct Kit
 };
 
 /// Fixed track identities. The panel is legended in silkscreen, so these are
-/// not user-editable and can live in flash.
+/// not user-editable and can live in flash. C1–C4 are the cartridge slots;
+/// their legend is deliberately generic because what is in them changes, and
+/// the cartridge's own name comes from its on-board EEPROM at boot.
 inline constexpr const char *kTrackName[kNumTracks]
-    = {"BD", "SD", "CH", "OH", "LT", "CP", "RS", "FM"};
+    = {"BD", "SD", "CH", "OH", "LT", "CP", "RS", "FM", "C1", "C2", "C3", "C4"};
 
-inline constexpr uint32_t kPatchMagic   = 0x4D4F5244; // 'DROM'
-inline constexpr uint16_t kPatchVersion = 1;
+inline constexpr uint32_t kPatchMagic = 0x4D4F5244; // 'DROM'
+
+/// Bumped to 2 when tracks went from 8 to 12. `Pattern` and `Kit` both changed
+/// size, so a v1 save read as v2 would be reinterpreted rather than rejected —
+/// exactly the failure SaveHeader exists to catch. `payload_size` alone would
+/// have caught this one, but only because the size happened to change.
+inline constexpr uint16_t kPatchVersion = 2;
 
 /// Guards a saved struct against being read by a different firmware version.
 ///

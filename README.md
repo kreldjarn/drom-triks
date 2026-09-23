@@ -1,13 +1,18 @@
 # drom-triks
 
 A synthesis-based hardware drum machine built on the [Electrosmith Daisy](https://daisy.audio)
-platform: 8 synth voices, a 16-step x0x-style sequencer with parameter locks, and a
-panel of real knobs, encoders and backlit keys.
+platform: 8 synth voices plus 4 analog cartridge slots, a 16-step x0x-style sequencer with
+parameter locks, and a panel of endless encoders and backlit keys.
 
 Sample playback and analog voice circuitry are explicit future phases. Both are planned for
 rather than retrofitted: the voice layer is built around an interface that a sample player or an
 analog voice can implement without touching the sequencer, and the v1 PCB reserves the power,
-trigger and audio-return paths an analog daughterboard will need.
+trigger and audio-return paths the analog hardware will need.
+
+Analog voices arrive as **cartridges** — one voice per card in a Game Boy cartridge shell, four
+swappable slots on a carrier board, adding tracks 9–12 rather than displacing digital voices.
+Carrier in [docs/05](docs/05-analog-expansion.md), the cards themselves in
+[docs/10](docs/10-cartridge.md).
 
 ## Documents
 
@@ -18,14 +23,15 @@ trigger and audio-return paths an analog daughterboard will need.
 | [docs/02-firmware.md](docs/02-firmware.md) | Module layout, timing model, voice engine, sequencer data model, UI state machine |
 | [docs/03-bom.md](docs/03-bom.md) | Bill of materials with part numbers and costed lines |
 | [docs/04-development-plan.md](docs/04-development-plan.md) | Phased build plan, milestones, risk register |
-| [docs/05-analog-expansion.md](docs/05-analog-expansion.md) | Hybrid architectures and what v1 must reserve |
+| [docs/05-analog-expansion.md](docs/05-analog-expansion.md) | Analog voice cartridges, the carrier board, and what v1 must reserve |
 | [docs/06-midi.md](docs/06-midi.md) | Transports, routing matrix, message map, clock recovery, SysEx |
 | [docs/07-test-equipment.md](docs/07-test-equipment.md) | What to buy, when — and why the scope comes last |
 | [docs/09-schematic.md](docs/09-schematic.md) | Step-by-step for the KiCad schematic, and what blocks it |
+| [docs/10-cartridge.md](docs/10-cartridge.md) | Analog cartridge design, slot pinout, and the Game Boy form factor |
 
 ## Design targets
 
-- 8 voices, all synthesised, ~20% CPU at 48 kHz — headroom for FX, samples and analog hybrids
+- 8 synth voices at ~20% CPU at 48 kHz, plus 4 analog cartridge slots — 12 tracks, one sequencer
 - Sample-accurate trigger timing (no block-quantised jitter), digital and analog alike
 - Parameter locks per step, Elektron-style: hold a step, turn a knob
 - Everything editable without entering a menu; the screen explains, it doesn't gate
@@ -101,8 +107,9 @@ Tight/Smooth tradeoff exposed as a user setting. Locked to a 90 BPM master, the 
 step spacing to **1 sample (0.02 ms)**; under ±1 ms source jitter, Smooth keeps the tempo
 estimate inside **0.06 BPM**.
 
-**UI state machine done.** Panel logic as pure state — step editing, track select, mute, soft
-takeover on the pots, and parameter locks written by holding a step and turning a knob. Testable
+**UI state machine done.** Panel logic as pure state — step editing, track select, mute, encoder
+acceleration, and parameter locks written by holding a step and turning a macro. Endless encoders
+mean there is no soft-takeover machinery to get wrong and a p-lock needs no pickup sweep. Testable
 headless, so the interaction model is verified before a panel exists.
 
 **Patch format done.** A patch is a `Pattern` plus a `Kit`, saved with a versioned header so a
@@ -116,6 +123,6 @@ real two-thread producer/consumer run.
 
 **LED and display rendering done.** Both are pure functions of machine + UI state, so the whole
 LED language is verified headless — including the frame-level **current budget**, which keeps the
-panel under 400 mA where an unclamped all-white frame would pull 1.8 A.
+panel under 400 mA where an unclamped all-white frame would pull 2.0 A.
 
 Next: pattern chaining, master FX, and the MIDI note/CC layer — all still board-free.

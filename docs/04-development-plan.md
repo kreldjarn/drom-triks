@@ -21,9 +21,14 @@ the work and all run on a breadboard, so a three-week PCB lead time costs you no
 
 Every I/O primitive proven in isolation, before any of it is committed to copper.
 
-- Seed3 + 1 × CD4051 + 6 pots → confirm `AdcChannelConfig::InitMux` and check for crosstalk
 - 1 × CD4021 + 8 buttons → confirm the stock `ShiftRegister4021` driver and `Switch` debounce
-- 1 encoder on direct GPIO → confirm no lost counts on a fast flick
+- **2 encoders on a CD4021 scanned at 10 kHz → confirm no lost counts on a hard spin.** This is
+  the second-highest-risk item in the build: eight encoders on direct GPIO would need 16 pins
+  that don't exist, so if the fast scan drops counts the fallback is a ~$1 I²C co-processor and
+  a second firmware. **Decision point — it changes the PCB**
+- Check the `Switch` debouncer still runs at 1 kHz off the 10 kHz scan, not at 10 kHz
+- Turn two or three candidate encoders and pick one on feel; you cannot choose detent torque
+  from a datasheet
 - 8 × SK6812 + 74AHCT125 → **write the SPI+DMA driver.** This is the highest-risk custom code
   in the build; do it early enough that the TLC5947 fallback is still on the table
 - SSD1309 OLED over SPI
@@ -52,7 +57,7 @@ PCB, so it must be settled here.
 ## Phase 3 — Sequencer core (~2–3 weeks)
 
 - Sample-accurate 96 PPQN clock with sub-block trigger offsets
-- Pattern data model, 8 tracks × 64 steps
+- Pattern data model, 12 tracks × 64 steps (8 digital voices + 4 analog cartridge slots)
 - Play/stop/tempo, swing, per-track length and speed (polymeter — one byte, large musical payoff)
 - Probability, ratchets, micro-timing
 - MIDI clock in/out with **interrupt timestamping + PLL recovery**, sync source priority
@@ -68,7 +73,8 @@ The phase that always takes longer than planned, because this is the actual inst
 
 - Mode state machine, `SHIFT` as a held modifier
 - **Parameter locks** — hold a step, turn a knob
-- Soft-takeover / pickup on pots (mandatory: six knobs address eight voices)
+- Encoder acceleration (mandatory: 24 detents/rev is unusable at one fixed step size)
+- Encoder push switches: push-to-default on a macro
 - LED language: velocity as brightness, track as hue, playhead as white flash
 - OLED pages that explain rather than gate
 - Live record with optional quantise
@@ -88,11 +94,22 @@ otherwise.
   single-ended or differential.** The TAC5242 supports both and Electrosmith hasn't documented
   which they used. This determines the entire output stage, and it's the one unknown in the
   hardware plan
+- **Second task: confirm the SAI2 alternate functions against the STM32H750 table.** D26/D27/D28
+  are reserved for a second audio input stream — freed by moving the encoders onto the CD4021
+  chain — but libDaisy hardcodes its AF rather than looking it up, so verify rather than trust.
+  Also pick an external ADC that does not need MCLK: `SAI2_MCLK_A` is `DISP_DC` and not free.
+  See [doc 05 §6.2](05-analog-expansion.md#62-digitising-the-cartridges--now-affordable).
+  It decides what lands on header pins 21–24, so settle it *before* layout
 - KiCad schematic (Electrosmith publish Seed footprints), then 4-layer layout
 - Ground discipline: separate LED and audio ground pours, single star point at USB
 - **Include the analog-expansion reservations** from [doc 05](05-analog-expansion.md): barrel
-  jack footprint, 2×10 header, 74HC595 trigger outputs, audio-in jacks. $4.90 against a respin
-- Leave unpopulated footprints for the SD socket, second CD4051 and clock jacks
+  jack footprint, 2×12 header footprint (2×10 populated), 74HC595 trigger outputs, audio-in
+  jacks. $5.00 against a respin
+- **Draw the cartridge carrier schematic too — but don't fab it.** It is the only way to find
+  out the expansion header pinout is missing a signal while fixing it is still free rather than
+  a respin. The carrier *board* waits until one analog voice exists on perfboard and you know
+  what a slot actually has to carry ([doc 05 §3.4](05-analog-expansion.md#34-when-to-build-it--schematic-early-board-late))
+- Leave unpopulated footprints for the SD socket, CV/expression jacks and clock jacks
 - Order from JLCPCB (qty 5), assemble, bring up rail by rail
 
 **Done when:** the Phase 4 firmware runs unmodified on the PCB. **Expect a second spin** — budget
@@ -104,7 +121,7 @@ for it rather than being disappointed by it.
 - Writes from the main loop only, on explicit save — never during playback
 - Master FX: drive, compressor, reverb
 - Per-voice FX sends
-- Pot calibration, factory reset, firmware version display
+- Encoder acceleration curve tuning, factory reset, firmware version display
 - Song mode / pattern chaining
 - SysEx pattern/kit dump and restore ([06-midi.md §8](06-midi.md#8-sysex))
 
@@ -117,8 +134,13 @@ Now that the instrument works, pick whichever of these you actually want. They'r
 - **Samples.** `SampleVoice : IVoice` drops into the existing array. SD card over SDMMC, streamed
   into SDRAM (64 MB ≈ 11 minutes of mono 48 kHz — you will not run out). Layer sample + synth per
   track for a Rytm-style hybrid
-- **Analog voices.** The daughterboard from [doc 05](05-analog-expansion.md). Start with an
-  808-style BD + SD and a stereo output filter, not a full analog eight-voice board
+- **Analog cartridges.** From [doc 05](05-analog-expansion.md) and [doc 10](10-cartridge.md), in
+  this order: the 808-style bridged-T kick on perfboard driven by the trigger outputs and a bench
+  supply, *then* the four-slot carrier designed around what that voice turned out to need, then
+  the same circuit as a cartridge.
+  Building the carrier first means guessing a slot's electrical envelope before any voice
+  exists to measure. Resist a full analog kit: hats and metallic percussion are square
+  oscillators and filters that the digital voices already nail
 - **Individual outs.** PCM1681 8-channel I2S DAC + six jacks
 - **CV/gate and analog clock.** The eight triggers from the 74HC595 are already there if you
   populated it in Phase 5
@@ -135,9 +157,12 @@ Now that the instrument works, pick whichever of these you actually want. They'r
 | LED ground noise in audio | Audible buzz, hard to fix post-layout | Separate pours, star ground, brightness clamp |
 | Block-quantised trigger timing | Sounds subtly bad, hard to diagnose later | Sub-block trigger offsets from Phase 3 |
 | UI scope creep | Phase 4 never ends | Freeze the mode list before starting; new ideas go to a v2 list |
+| 10 kHz encoder scan drops counts | Knobs feel broken; 16 GPIOs don't exist as a fallback | Prove it in Phase 1; I²C co-processor fallback decided there |
 | No `IVoice` seam | Samples/analog become rewrites | Define it in Phase 2, before the first voice |
 | QSPI write faults | Data loss on save | `BOOT_SRAM` validated in Phase 0 |
 | Analog expansion needs ±12 V | Power respin | Barrel jack footprint in v1 ($1.50) |
+| SAI2 alternate functions differ from libDaisy's assumption | Cartridges are sum-only; header pins 21–24 wasted | Check the H750 AF table in Phase 5, before layout; the quad VCA ships either way |
+| Cartridge CV bus too slow for the audio callback | P-locks land 1–2 ms behind their own trigger on analog tracks | SPI DACs written from the callback, not I²C from the main loop; measure the burst at bring-up |
 | External clock jitter imported into groove | Sounds loose, blamed on the sequencer | Interrupt timestamping + PLL, built in Phase 3 |
 | D29/D30 assigned to other I/O | USB MIDI host needs a respin | Reserve them in the Phase 5 pin map |
 

@@ -23,9 +23,9 @@ struct DisplayLines
     }
 };
 
-/// The screen explains; it never gates. Touch a knob and it tells you what
-/// that knob is doing; otherwise it shows where you are in the pattern. No
-/// menu ever becomes the only route to a feature.
+/// The screen explains; it never gates. Turn a knob and it tells you what that
+/// knob is doing; otherwise it shows where you are in the pattern. No menu ever
+/// becomes the only route to a feature.
 class DisplayRenderer
 {
   public:
@@ -38,10 +38,10 @@ class DisplayRenderer
         const int   sel  = ui.selected_track();
         const char *name = kTrackName[sel];
 
-        const int pot = ui.last_pot();
-        if(pot >= 0 && ui.since_last_pot_ms() < kParamHoldMs)
+        const int macro = ui.last_macro();
+        if(macro >= 0 && ui.since_last_macro_ms() < kParamHoldMs)
         {
-            RenderParam(m, ui, sel, name, pot, d);
+            RenderParam(m, ui, sel, name, macro, d);
             return;
         }
         RenderOverview(m, ui, sel, name, d);
@@ -52,32 +52,23 @@ class DisplayRenderer
                             const Ui      &ui,
                             int            sel,
                             const char    *name,
-                            int            pot,
+                            int            macro,
                             DisplayLines  &d)
     {
-        const ParamId id     = static_cast<ParamId>(pot);
-        const float   stored = m.patch().kit.params[sel][pot];
+        const ParamId id  = static_cast<ParamId>(macro);
+        const float   val = ui.edit_value(macro);
 
         std::snprintf(d.text[0], DisplayLines::kCols + 1, "%-4s %s", name, ParamName(id));
 
+        // Locking shows which step is being written, because the value on
+        // screen belongs to that step and not to the track.
         if(ui.held_step() >= 0)
             std::snprintf(d.text[1], DisplayLines::kCols + 1,
-                          "LOCK step %-2d  %3d", ui.held_step() + 1, Pct(ui.last_raw(pot)));
+                          "LOCK step %-2d  %3d", ui.held_step() + 1, Pct(val));
         else
-            std::snprintf(d.text[1], DisplayLines::kCols + 1, "%18d", Pct(stored));
+            std::snprintf(d.text[1], DisplayLines::kCols + 1, "%18d", Pct(val));
 
-        if(!ui.pot_caught(pot))
-        {
-            // Soft takeover made visible. Without this the knob feels broken:
-            // you turn it, nothing happens, and nothing says why.
-            std::snprintf(d.text[2], DisplayLines::kCols + 1,
-                          "knob %3d -> %3d", Pct(ui.last_raw(pot)), Pct(stored));
-            std::snprintf(d.text[3], DisplayLines::kCols + 1, "turn to pick up");
-        }
-        else
-        {
-            std::snprintf(d.text[3], DisplayLines::kCols + 1, "%s", Bar(stored));
-        }
+        std::snprintf(d.text[3], DisplayLines::kCols + 1, "%s", Bar(val));
     }
 
     static void RenderOverview(const Machine &m,

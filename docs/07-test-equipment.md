@@ -2,7 +2,7 @@
 
 **Short answer on the oscilloscope: not yet.** For Phases 0–6 a ~$15 logic analyser will earn its
 keep many times over and a scope will mostly sit idle. The scope becomes genuinely necessary when
-you start the [analog daughterboard](05-analog-expansion.md) — buy it then, with better
+you start the [analog cartridges](05-analog-expansion.md) — buy it then, with better
 information about what you need.
 
 Prices are approximate, for rough budgeting only.
@@ -74,7 +74,7 @@ rail on a $40 board is a cheap lesson only if you catch it in the first second.
 
 ## Oscilloscope — when, and which
 
-Buy one when you start the **analog daughterboard**, where you're debugging envelopes, filter
+Buy one when you start the **analog cartridges**, where you're debugging envelopes, filter
 responses and trigger pulses in the analog domain and there is no substitute.
 
 Before that it's largely redundant: the logic analyser covers digital timing better, the audio

@@ -60,6 +60,8 @@ class Machine
 
         voices_[0] = &bd_; voices_[1] = &sd_; voices_[2] = &ch_; voices_[3] = &oh_;
         voices_[4] = &lt_; voices_[5] = &cp_; voices_[6] = &rs_; voices_[7] = &fm_;
+        for(int i = 0; i < kNumCartridgeSlots; ++i)
+            voices_[kNumDigitalVoices + i] = &cart_[i];
         for(int i = 0; i < kNumTracks; ++i)
             slots_[i].Init(voices_[i], sample_rate);
 
@@ -228,6 +230,11 @@ class Machine
 
     BassDrum bd_; SnareDrum sd_; ClosedHat ch_; OpenHat oh_;
     Tom lt_; Clap cp_; RimShot rs_; FmVoice fm_;
+
+    /// Tracks 9–12. An AnalogVoice replaces one of these per occupied slot once
+    /// a carrier exists; until then the tracks sequence and p-lock normally and
+    /// simply sound nothing.
+    EmptySlot cart_[kNumCartridgeSlots];
 
     IVoice   *voices_[kNumTracks] = {};
     VoiceSlot slots_[kNumTracks];

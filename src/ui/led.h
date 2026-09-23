@@ -32,7 +32,7 @@ struct Rgb
 };
 
 inline constexpr int kNumTransportKeys = 6;
-inline constexpr int kNumLeds = kNumStepKeys + kNumTracks + kNumTransportKeys; // 30
+inline constexpr int kNumLeds = kNumStepKeys + kNumTracks + kNumTransportKeys; // 34
 
 /// One hue per track, chosen to stay distinguishable at low brightness — which
 /// is where they will actually live, since full brightness is unaffordable.
@@ -45,11 +45,20 @@ inline constexpr Rgb kTrackColour[kNumTracks] = {
     {60, 110, 255},  // CP  blue
     {160, 70, 255},  // RS  violet
     {255, 60, 190},  // FM  magenta
+
+    // The four cartridge slots. The eight digital voices already span the hue
+    // circle, so there is no unused hue left to give these — they are separated
+    // by *saturation* instead. Washed-out pastels read as a different class of
+    // track at a glance, which is what they are.
+    {255, 170, 150}, // C1  pale coral
+    {170, 245, 185}, // C2  pale green
+    {165, 200, 255}, // C3  pale blue
+    {235, 175, 250}, // C4  pale violet
 };
 
 // --- current budget ---------------------------------------------------------
 //
-// 30 SK6812s at full white is 30 x 60 mA = 1.8 A, far past any USB supply. The
+// 34 SK6812s at full white is 34 x 60 mA = 2.0 A, far past any USB supply. The
 // renderer is the only place that knows what the whole frame looks like, so it
 // is where the ceiling belongs — a per-LED clamp cannot see the total.
 

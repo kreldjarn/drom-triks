@@ -170,11 +170,10 @@ int main()
         Check(std::strstr(d.text[1], "BPM") != nullptr, "and shows tempo");
         Check(std::strstr(d.text[1], "INT") != nullptr, "and the sync source");
 
-        ui.PotMove(0, 0.50f);          // catch, then move
-        ui.PotMove(0, 0.62f); Pump(m);
+        ui.EncoderTurn(0, +3); Pump(m);
         disp.Render(m, ui, d);
         Check(std::strstr(d.text[0], "TUNE") != nullptr,
-              "touching a knob shows that parameter's name");
+              "turning a knob shows that parameter's name");
 
         ui.SetTime(1000 + DisplayRenderer::kParamHoldMs + 1);
         disp.Render(m, ui, d);
@@ -182,26 +181,29 @@ int main()
               "and reverts to the overview once you let go");
     }
 
-    std::printf("\nsoft takeover, explained on screen:\n");
+    std::printf("\nlocking, explained on screen:\n");
     {
         m.Init(48000.f);
-        m.mutable_patch().kit.params[0][0] = 0.20f;
-        m.mutable_patch().kit.params[1][0] = 0.90f;
+        m.mutable_patch().kit.params[0][0] = 0.50f;
         Ui ui; ui.Init(&m);
         DisplayLines d;
 
         ui.SetTime(500);
-        ui.PotMove(0, 0.20f); Pump(m);     // caught on track 0
-        ui.TrackPress(1);                  // switch: pot is now stale
-        ui.PotMove(0, 0.25f); Pump(m);
-
+        ui.StepPress(6);
+        ui.EncoderTurn(0, +6); Pump(m);
         disp.Render(m, ui, d);
-        const bool shows_both = std::strstr(d.text[2], "25") && std::strstr(d.text[2], "90");
-        Check(!ui.pot_caught(0), "the pot is released after a track change");
-        Check(shows_both, "the screen shows knob position AND stored value");
-        Check(std::strstr(d.text[3], "pick up") != nullptr,
-              "and says what to do about it");
-        std::printf("      | %s\n      | %s\n", d.text[2], d.text[3]);
+
+        Check(std::strstr(d.text[0], "TUNE") != nullptr, "the parameter is named");
+        Check(std::strstr(d.text[1], "LOCK") != nullptr,
+              "the screen says a lock is being written, not a track edit");
+        Check(std::strstr(d.text[1], "step 7") != nullptr, "and names the step being locked");
+        std::printf("      | %s\n      | %s\n", d.text[0], d.text[1]);
+
+        // The value on screen is the step's, not the track's — they differ, and
+        // showing the track's while locking would be actively misleading.
+        ui.StepRelease(6); Pump(m);
+        Check(std::fabs(m.patch().kit.params[0][0] - 0.50f) < 1e-5f,
+              "and the track's own value never moved");
     }
 
     std::printf("\n%s\n", failures ? "UX TESTS FAILED" : "all UX tests passed");
