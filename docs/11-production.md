@@ -43,11 +43,41 @@ Two parts in the current BOM fail that test today:
 
 | Part | Problem | What to do |
 | --- | --- | --- |
-| **SK6812 MINI-E** | Mechanical-keyboard channel, not a general distributor line. 100 units is 3,400 LEDs | Identify a direct supplier and confirm they will sell at that quantity, before the design depends on the part |
+| **SK6812 MINI-E** | Mechanical-keyboard channel, not a general distributor line. 100 units is 3,400 LEDs | Identify a direct supplier and confirm they will sell at that quantity — or retire the part entirely by going top-mount, below |
 | **Quad VCA (cartridge carrier)** | The SSM2164 is discontinued; the V2164/AS2164 that replaced it come from boutique synth suppliers with real supply gaps | Find a second source, or design the carrier so a different VCA topology drops in |
 
 Neither is fatal and neither is urgent this month. Both become expensive the moment a board is laid
 out around them.
+
+### Open question: does the LED have to be reverse-mount?
+
+Worth settling before layout, because it may retire the riskier of those two parts outright.
+
+The switch's SMD cutout faces the PCB either way ([hardware §5](01-hardware.md#5-mechanical)), so
+both of these light the same keycap:
+
+| | Where it sits | Sourcing |
+| --- | --- | --- |
+| **SK6812 MINI-E** (current) | bottom face, shining up through a hole in the board | mechanical-keyboard channel only — the row above |
+| **SK6812 MINI**, top-mount | top face, inside the switch's own cutout | an ordinary 3535 addressable RGB, stocked broadly |
+
+**What is not in question is RGB.** The LED language in
+[firmware §7](02-firmware.md#7-ui-state-machine) is built on hue — track colour on every step key,
+a white playhead that outranks everything, red for mute, and a lock rendered as a shift toward
+white measured at 0.42 against 0.12 for a plain step. Single-colour LEDs inside the switches, the
+classic backlit-keyboard approach, would collapse all of that onto brightness, which is already
+carrying velocity. That trade is already priced as the TLC5947 fallback in
+[hardware §3.4](01-hardware.md#34-leds--sk6812-chain-on-spidma) and it is a worse instrument, not
+just a different one.
+
+What *is* in question is the mounting, and the argument against top-mount is assembly.
+[The BOM](03-bom.md#assembly) says the reverse-mount parts are what "makes the board a two-sided
+reflow job". **That framing wants checking against the actual layout**, because the Kailh hot-swap
+sockets are already bottom-side SMD: if the LEDs share that face, reverse-mount is not adding a
+reflow pass and the top face is through-hole switches only. If so the assembly argument for MINI-E
+is real and top-mount costs a second pass. If not, top-mount is free and removes a supply risk.
+
+Decide it at the Phase 5 schematic, before anything is placed.
 
 ## 3. Three things to build into v1 firmware
 

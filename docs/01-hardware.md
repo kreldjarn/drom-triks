@@ -210,6 +210,11 @@ pushing the buffer with DMA — standard technique, ~100 lines, zero CPU after t
 starts. libDaisy has no stock driver for this; it's the one piece of custom hardware code
 in the build.
 
+**The reverse-mount choice is not settled.** A top-mount SK6812 MINI lights the same cap through
+the same switch cutout and is a far easier part to buy at 3,400 pieces — see
+[production §2](11-production.md#open-question-does-the-led-have-to-be-reverse-mount). Decide it at
+the Phase 5 schematic; it changes the footprint but nothing above it.
+
 > **Fallback if the DMA driver fights you:** 2 × **TLC5947** (24-channel 12-bit PWM, SPI,
 > daisy-chainable). Hardware greyscale, no timing sensitivity, ~$8. You lose RGB and gain
 > certainty. Decide by the end of [Phase 1](04-development-plan.md#phase-1--breadboard-rig-12-weeks) —
