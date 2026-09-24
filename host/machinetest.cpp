@@ -255,6 +255,18 @@ int main()
         Check(storage.LoadPatch(0, back) == Storage::Result::Ok, "and loads back");
         Check(back.kit.params[2][static_cast<int>(ParamId::Tune)] == 0.77f,
               "with the edit intact after a flash round trip");
+
+        // The mirror: only the audio side may install a loaded patch.
+        c.value = 0.11f;
+        m.Push(c);
+        Pump(m);
+        Check(m.patch().kit.params[2][static_cast<int>(ParamId::Tune)] == 0.11f,
+              "the live patch moves on");
+        m.RequestLoad(&back);
+        Pump(m);
+        Check(m.LoadReady(), "a load request completes on the audio side");
+        Check(m.patch().kit.params[2][static_cast<int>(ParamId::Tune)] == 0.77f,
+              "and the loaded patch replaces the live one");
     }
 
     std::printf("\nqueue overflow is survivable:\n");

@@ -358,6 +358,43 @@ int main()
         Check(ui.mode() == Ui::Mode::Play, "releasing PATT returns to play");
     }
 
+    std::printf("\nwhat a knob says it is doing:\n");
+    {
+        // Anything that draws must agree with what a turn would write. Naming a
+        // macro from the page alone was wrong the moment SHIFT gained layers:
+        // the screen would name one parameter while the knob moved another.
+        static Machine m; static Ui ui;
+        m.Init(48000.f); ui.Init(&m); ui.SetTime(1000);
+        auto Eq = [](const char *a, const char *b) { return std::strcmp(a, b) == 0; };
+
+        Check(Eq(ui.MacroContext(), "INST"), "defaults to the INST page");
+        Check(Eq(ui.MacroName(0), "TUNE"), "macro 0 is TUNE there");
+        Check(Eq(ui.MacroName(7), "--"), "and the reserved eighth says so");
+
+        ui.SetPage(1);
+        Check(Eq(ui.MacroContext(), "FLTR"), "the filter page names itself");
+        Check(Eq(ui.MacroName(0), "SAT"), "and macro 0 is the saturator");
+
+        ui.TransportPress(Ui::Key::Shift);
+        Check(Eq(ui.MacroContext(), "MASTER FX 1"), "SHIFT moves to master FX");
+        Check(Eq(ui.MacroName(0), "DLY TIME"), "with the delay first");
+        ui.NavTurn(1, 1);
+        Check(Eq(ui.MacroContext(), "MASTER FX 2"), "and the second bank");
+        Check(Eq(ui.MacroName(0), "CMP THR"), "reaches the compressor");
+
+        ui.StepPress(3);
+        Check(Eq(ui.MacroContext(), "STEP"), "SHIFT over a held step is step detail");
+        Check(Eq(ui.MacroName(0), "VEL"), "starting with velocity");
+        Check(Eq(ui.MacroName(6), "--"), "and only four of the eight are live");
+
+        // The value has to track the same target, not just the name.
+        ui.TransportRelease(Ui::Key::Shift);
+        ui.StepRelease(3);
+        ui.SetPage(0);
+        Check(std::fabs(ui.MacroValue(5) - 0.8f) < 1e-6f,
+              "MacroValue reads the target the name refers to");
+    }
+
     std::printf("\n%s\n", failures ? "UI TESTS FAILED" : "all UI tests passed");
     return failures;
 }

@@ -25,6 +25,7 @@ struct Command
         SetKitParam,   ///< track, param, value
         SetFxParam,    ///< param = FxId, value — master delay/reverb/compressor
         Snapshot,      ///< copy the patch to snapshot_dst_ for the main loop
+        LoadPatch,     ///< adopt the patch at load_src_, from the main loop
         ToggleStep,    ///< track, step
         SetStepLock,   ///< track, step, param, value
         SetStepField,  ///< track, step, param = StepField, value 0..1
@@ -124,6 +125,23 @@ class Machine
         return snapshot_done_.load(std::memory_order_acquire);
     }
 
+    /// Hand a freshly loaded patch to the audio side, which is the only thing
+    /// allowed to install it. The mirror of RequestSnapshot: the main loop
+    /// reads flash, the audio side adopts the result at a block boundary.
+    ///
+    /// `src` must outlive the request — in practice it is the Storage staging
+    /// buffer, which is static.
+    void RequestLoad(const Patch *src)
+    {
+        load_src_ = src;
+        load_done_.store(false, std::memory_order_relaxed);
+        Command c;
+        c.type = Command::Type::LoadPatch;
+        Push(c);
+    }
+
+    bool LoadReady() const { return load_done_.load(std::memory_order_acquire); }
+
     /// Read-only view for drawing. May be one block stale, and a concurrent
     /// edit can tear a field — which costs at worst one frame of wrong
     /// brightness, and never a wrong note, because the audio side is the only
@@ -199,6 +217,20 @@ class Machine
         const int t = c.track < kNumTracks ? c.track : 0;
         switch(c.type)
         {
+            case Command::Type::LoadPatch:
+                if(load_src_)
+                {
+                    patch_ = *load_src_;
+                    // Re-point the sequencer and push every stored value back
+                    // through the slots: the voices, strips, LFOs and master FX
+                    // all hold their own copies, and none of them read the
+                    // patch directly.
+                    seq_.SetPattern(&patch_.pattern);
+                    ApplyKit();
+                }
+                load_done_.store(true, std::memory_order_release);
+                break;
+
             case Command::Type::Snapshot:
                 // snapshot_dst_ was published by the queue's release/acquire
                 // pair, so it is visible here without a separate barrier.
@@ -346,6 +378,8 @@ class Machine
 
     MasterFx                fx_;
     Patch                   *snapshot_dst_ = nullptr;
+    const Patch             *load_src_     = nullptr;
+    std::atomic<bool>        load_done_{false};
     std::atomic<bool>        snapshot_done_{false};
     SpscQueue<Command, 128> queue_;
     AudioState              state_;

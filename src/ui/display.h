@@ -55,13 +55,13 @@ class DisplayRenderer
                             int            macro,
                             DisplayLines  &d)
     {
-        const ParamId id  = ui.ParamForMacro(macro);
-        const float   val = ui.edit_value(macro);
+        const float val = ui.edit_value(macro);
 
-        // The page name earns its space: eight knobs now mean four different
-        // things depending on the page, so "SPEED" alone is ambiguous.
-        std::snprintf(d.text[0], DisplayLines::kCols + 1, "%-4s %-4s %s",
-                      name, kPageName[ParamPage(id)], ParamName(id));
+        // Named through the Ui rather than from the page alone: with SHIFT held
+        // the macros are on master FX or step detail, and labelling them from
+        // the page would name one parameter while the knob moves another.
+        std::snprintf(d.text[0], DisplayLines::kCols + 1, "%-4s %s %s",
+                      name, ui.MacroContext(), ui.MacroName(macro));
 
         // Locking shows which step is being written, because the value on
         // screen belongs to that step and not to the track.

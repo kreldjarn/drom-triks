@@ -107,10 +107,39 @@ class Ui
 
     int page() const { return page_; }
 
-    /// The parameter macro encoder `enc` currently addresses.
+    /// The parameter macro encoder `enc` addresses **on the current page**,
+    /// ignoring the SHIFT layers. Prefer MacroName/MacroValue for display.
     ParamId ParamForMacro(int enc) const
     {
         return ParamAt(page_, (enc < 0 || enc >= kNumMacros) ? 0 : enc);
+    }
+
+    /// What a macro is labelled and reading right now, SHIFT layers included.
+    ///
+    /// Anything that draws has to agree with what a turn would actually write,
+    /// or the screen names one parameter while the knob moves another.
+    const char *MacroName(int enc) const
+    {
+        const Target t = TargetFor(enc);
+        switch(t.kind)
+        {
+            case Target::Kind::Fx:        return kFxName[t.index];
+            case Target::Kind::Param:     return kParamInfo[t.index].name;
+            case Target::Kind::StepField: return kStepFieldName[t.index];
+            default:                      return "--";
+        }
+    }
+
+    float MacroValue(int enc) const { return CurrentValueFor(TargetFor(enc)); }
+
+    /// Which layer the macros are on, for a header: "INST", "FX 2", "STEP".
+    const char *MacroContext() const
+    {
+        if(shift_ && held_step_ >= 0)
+            return "STEP";
+        if(shift_)
+            return fx_bank_ == 0 ? "MASTER FX 1" : "MASTER FX 2";
+        return kPageName[page_];
     }
 
     void TransportPress(Key k)

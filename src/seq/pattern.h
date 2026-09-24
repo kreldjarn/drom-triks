@@ -66,6 +66,9 @@ enum class StepField : uint8_t
     Count
 };
 
+inline constexpr const char *kStepFieldName[static_cast<int>(StepField::Count)]
+    = {"VEL", "MICRO", "PROB", "RATCH"};
+
 enum class Direction : uint8_t
 {
     Forward = 0,

@@ -21,6 +21,7 @@
 #include <termios.h>
 #include <unistd.h>
 
+#include "../src/io/storage.h"
 #include "../src/machine.h"
 #include "../src/ui/display.h"
 #include "../src/ui/led.h"
@@ -76,6 +77,21 @@ int g_sel_enc = 0;
 /// A terminal gives no key-up events, so "hold a step and turn a knob" has to
 /// become a latch: press l, then a step, and that step stays held until l again.
 bool g_lock_arm = false;
+
+/// Same problem for the two held modifiers on the real panel. SHIFT puts the
+/// macros on master FX; PATT turns the step keys into pattern slots.
+bool g_shift_latch = false;
+bool g_patt_latch  = false;
+
+/// Flash, in RAM. Enough to exercise the real Storage path — slot arithmetic,
+/// erase semantics, header validation — without persisting between runs.
+RamFlash<kQspiBytes> g_flash;
+Storage              g_storage;
+
+/// A save cannot complete in one pass: the audio side has to snapshot the patch
+/// first, because a copy taken by this thread can tear. See firmware 8.
+int         g_pending_save = -1;
+char        g_status[64]   = {};
 
 // --- terminal --------------------------------------------------------------
 termios g_saved_termios;
@@ -379,33 +395,42 @@ void Draw(uint32_t now_ms)
         std::printf("%-*s", kCellCols, kTrackName[i]);
 
     // Macro encoders, with the selected one marked.
-    std::printf("\n\n  macros ");
+    // Named and valued through the Ui, not from the page: with SHIFT held the
+    // macros are on master FX, and labelling them from the page would name one
+    // parameter while the knob moves another.
+    std::printf("\n\n  \033[1m%-11s\033[0m", g_ui.MacroContext());
     for(int i = 0; i < kNumMacros; ++i)
     {
-        const float v = g_machine.patch().kit.params[g_ui.selected_track()][i];
-        const bool  sel = (i == g_sel_enc);
-        std::printf("%s%-5s %3d%s  ",
+        if(i == kNumMacros / 2)
+            std::printf("\n  %-11s", "");
+        const bool sel = (i == g_sel_enc);
+        std::printf("%s%-8.8s%4d%s  ",
                     sel ? "\033[7m" : "",
-                    ParamName(static_cast<ParamId>(i)),
-                    static_cast<int>(v * 100.f + 0.5f),
+                    g_ui.MacroName(i),
+                    static_cast<int>(g_ui.MacroValue(i) * 100.f + 0.5f),
                     sel ? "\033[0m" : "");
     }
 
-    std::printf("\n\n  \033[2m%s%s%s\033[0m\n",
+    std::printf("\n\n  \033[2m%s%s%s%s\033[0m\n",
                 g_ui.mode() == Ui::Mode::Mute ? "[MUTE MODE] " : "",
+                g_patt_latch ? "[PATTERN - step key loads, S+step saves] " : "",
                 g_lock_arm ? "[LOCK ARMED - press a step key] " : "",
                 g_ui.held_step() >= 0
                     ? "[HOLDING STEP - turn a macro to write a lock, l to finish]"
                     : "");
+    if(g_status[0])
+        std::printf("  \033[1;32m%s\033[0m\n", g_status);
     if(g_recording.load())
         std::printf("  \033[1;31m* REC\033[0m  %.1f s\n",
                     g_rec_used.load() / 2.0 / g_sample_rate);
     else if(g_rec_used.load() > 0)
         std::printf("  \033[2mrecorded %.1f s - saved on quit\033[0m\n",
                     g_rec_used.load() / 2.0 / g_sample_rate);
-    std::printf("\n  \033[2mspace play/stop   , . select pot   - = adjust   "
-                "m mute mode\n"
-                "  l lock a step     [ ] tempo      r record      esc quit\033[0m\n");
+    std::printf("\n  \033[2mspace play/stop  , . select pot  - = adjust  "
+                "enter default  p page\n"
+                "  s shift (master FX)  l lock a step  b pattern  t tap  "
+                "[ ] tempo\n"
+                "  m mute mode  r record  esc quit\033[0m\n");
     std::fflush(stdout);
 }
 
@@ -442,6 +467,7 @@ int main(int argc, char **argv)
         return 1;
     }
     g_machine.Init(static_cast<float>(g_sample_rate));
+    g_storage.Init(&g_flash);
     g_ui.Init(&g_machine);
     g_rec.assign(static_cast<size_t>(g_sample_rate) * 2 * 60 * kRecMinutes, 0.f);
     if(start_recording)
@@ -553,6 +579,28 @@ int main(int argc, char **argv)
                     break;
                 case ',': g_sel_enc = (g_sel_enc + kNumMacros - 1) % kNumMacros; break;
                 case '.': g_sel_enc = (g_sel_enc + 1) % kNumMacros; break;
+                case 'p':
+                    // The nav encoder wraps here but clamps on hardware; with
+                    // four pages and one key, wrapping is the usable choice.
+                    g_ui.SetPage((g_ui.page() + 1) % kNumPages);
+                    break;
+                case 's':
+                    g_shift_latch = !g_shift_latch;
+                    if(g_shift_latch)
+                        g_ui.TransportPress(Ui::Key::Shift);
+                    else
+                        g_ui.TransportRelease(Ui::Key::Shift);
+                    break;
+                case 'b':
+                    g_patt_latch = !g_patt_latch;
+                    if(g_patt_latch)
+                        g_ui.TransportPress(Ui::Key::Patt);
+                    else
+                        g_ui.TransportRelease(Ui::Key::Patt);
+                    break;
+                case 't': g_ui.TransportPress(Ui::Key::Tap); break;
+                case '\r':
+                case '\n': g_ui.EncoderPush(g_sel_enc); break;
                 case '-':
                 case '=':
                     // One detent per keypress. Acceleration keys off the
@@ -594,6 +642,35 @@ int main(int argc, char **argv)
                     break;
                 default: break;
             }
+        }
+
+        // Flash work the UI asked for. Saving is two-phase: ask the audio side
+        // to snapshot, then write once it says the copy is coherent.
+        const auto req = g_ui.TakeStorageRequest();
+        if(req.type == Ui::StorageRequest::Type::SavePattern)
+        {
+            g_machine.RequestSnapshot(&g_storage.staging());
+            g_pending_save = req.slot;
+        }
+        else if(req.type == Ui::StorageRequest::Type::LoadPattern)
+        {
+            static Patch loaded;
+            const auto   r = g_storage.LoadPatch(req.slot, loaded);
+            if(r == Storage::Result::Ok)
+            {
+                g_machine.RequestLoad(&loaded);
+                std::snprintf(g_status, sizeof(g_status), "loaded slot %u", req.slot);
+            }
+            else
+                std::snprintf(g_status, sizeof(g_status), "slot %u: %s", req.slot,
+                              Storage::Describe(r));
+        }
+        if(g_pending_save >= 0 && g_machine.SnapshotReady())
+        {
+            const auto r = g_storage.SaveStaged(static_cast<uint32_t>(g_pending_save));
+            std::snprintf(g_status, sizeof(g_status), "saved slot %d: %s",
+                          g_pending_save, Storage::Describe(r));
+            g_pending_save = -1;
         }
 
         ms += 16;
