@@ -675,4 +675,275 @@ class SnareDrumPunch : public VoiceBase
     float snap_ = 0.6f, vel_ = 1.f;
 };
 
+/// 909-style kick. A fast pitch drop under a short tail, with a click on top —
+/// where the 808 model is a long sine, this is a beater hitting a head.
+///
+/// The click is a separate few-millisecond noise burst through a highpass
+/// rather than FM on the body: FM brightens the whole hit, while a 909 click is
+/// a distinct transient that stops before the body has finished moving.
+class BassDrum909 : public VoiceBase
+{
+  public:
+    void Init(float sr) override
+    {
+        sr_ = sr;
+        noise_.Init();
+        amp_.Init(sr);
+        amp_.SetTime(daisysp::ADENV_SEG_ATTACK, 0.0005f);
+        amp_.SetCurve(kPercCurve);
+        amp_.SetMax(1.f); amp_.SetMin(0.f);
+        click_.Init(sr);
+        click_.SetTime(daisysp::ADENV_SEG_ATTACK, 0.0002f);
+        click_.SetTime(daisysp::ADENV_SEG_DECAY, 0.004f);
+        click_.SetCurve(kPercCurve);
+        click_.SetMax(1.f); click_.SetMin(0.f);
+        hp_.Init(sr);
+        hp_.SetFreq(1800.f);
+        hp_.SetRes(0.2f);
+        Retime();
+    }
+
+    void Trigger(float velocity) override
+    {
+        vel_    = velocity;
+        phase_  = 0.f;
+        drop_   = 1.f;
+        active_ = true;
+        amp_.Trigger();
+        click_.Trigger();
+    }
+
+    float Process() override
+    {
+        if(!active_)
+            return 0.f;
+        const float ae = amp_.Process();
+        const float ce = click_.Process();
+        if(!amp_.IsRunning() && ae <= 0.f)
+        {
+            active_ = false;
+            return 0.f;
+        }
+
+        drop_ *= drop_coeff_;
+        phase_ += (base_hz_ * (1.f + drop_ * depth_)) / sr_;
+        if(phase_ >= 1.f)
+            phase_ -= 1.f;
+
+        hp_.Process(noise_.Process());
+        const float body = FastSin(phase_) * ae;
+        return Shape((body + hp_.High() * ce * click_amt_) * vel_);
+    }
+
+  protected:
+    void OnParam(ParamId id, float v) override
+    {
+        switch(id)
+        {
+            case ParamId::Tune:  base_hz_ = 40.f + v * 50.f; break;
+            case ParamId::Decay: Retime(); break;
+            case ParamId::Tone:  click_amt_ = v * 0.8f; break;
+            // Shallower and faster than the boom machine: a 909 drop is over
+            // before you can hear it as a sweep.
+            case ParamId::Snap:  depth_ = 1.f + v * 6.f; Retime(); break;
+            default: break;
+        }
+    }
+
+  private:
+    void Retime()
+    {
+        const float d = DecayTime(param(ParamId::Decay)) * 0.7f;
+        amp_.SetTime(daisysp::ADENV_SEG_DECAY, d);
+        drop_coeff_ = expf(-1.f / (0.012f * sr_));
+    }
+
+    daisysp::WhiteNoise noise_;
+    daisysp::AdEnv      amp_, click_;
+    daisysp::Svf        hp_;
+    float sr_ = 48000.f, phase_ = 0.f, base_hz_ = 55.f;
+    float drop_ = 0.f, drop_coeff_ = 0.99f, depth_ = 4.f;
+    float click_amt_ = 0.4f, vel_ = 1.f;
+};
+
+/// 808-style snare: DaisySP's AnalogSnareDrum with an amplitude envelope
+/// wrapped around it.
+///
+/// The wrapper is not decoration. That model gives its body resonators a Q of
+/// 2000 x 2^(decay x 7), so even at DECAY 0 they ring for about a second, and
+/// measured across the whole range the tail never fell below -40 dB inside five
+/// seconds and was not monotonic. Its own DECAY is therefore unusable as a knob.
+/// Holding it at a fixed value and gating the output with our own envelope
+/// keeps the 808 character and makes DECAY mean what it says - which is exactly
+/// the fix docs/02-firmware.md 5 records but never applied.
+class SnareDrum808 : public VoiceBase
+{
+  public:
+    void Init(float sr) override
+    {
+        d_.Init(sr);
+        // Fixed, mid-range: this is now a timbre control, not a time one.
+        d_.SetDecay(0.4f);
+        amp_.Init(sr);
+        amp_.SetTime(daisysp::ADENV_SEG_ATTACK, 0.0005f);
+        amp_.SetCurve(kPercCurve);
+        amp_.SetMax(1.f); amp_.SetMin(0.f);
+        Retime();
+    }
+
+    void Trigger(float velocity) override
+    {
+        d_.SetAccent(velocity);
+        pending_ = true;
+        active_  = true;
+        amp_.Trigger();
+    }
+
+    float Process() override
+    {
+        if(!active_)
+            return 0.f;
+        const float e = amp_.Process();
+        const float s = d_.Process(pending_);
+        pending_      = false;
+        if(!amp_.IsRunning() && e <= 0.f)
+        {
+            active_ = false;
+            return 0.f;
+        }
+        return Shape(s * e);
+    }
+
+  protected:
+    void OnParam(ParamId id, float v) override
+    {
+        switch(id)
+        {
+            case ParamId::Tune:  d_.SetFreq(150.f + v * 300.f); break;
+            case ParamId::Decay: Retime(); break;
+            case ParamId::Tone:  d_.SetTone(v); break;
+            case ParamId::Snap:  d_.SetSnappy(v); break;
+            default: break;
+        }
+    }
+
+  private:
+    void Retime()
+    {
+        amp_.SetTime(daisysp::ADENV_SEG_DECAY,
+                     DecayTime(param(ParamId::Decay)) * 0.6f);
+    }
+
+    daisysp::AnalogSnareDrum d_;
+    daisysp::AdEnv           amp_;
+    bool                     pending_ = false;
+};
+
+/// Glitch percussion. A burst of very short grains at unrelated pitches, run
+/// through bit and rate reduction.
+///
+/// SNAP is the chaos control and it does something unusual: at zero the seed is
+/// reset on every trigger, so a hit is **identical every time** and a pattern is
+/// reproducible. Above zero the seed advances per hit, so no two are the same.
+/// That is deliberate - a machine that never repeats is fun and impossible to
+/// arrange with, so the knob has to reach both.
+class GlitchPerc : public VoiceBase
+{
+  public:
+    void Init(float sr) override
+    {
+        sr_ = sr;
+        crush_.Init();
+        grain_env_.Init(sr);
+        grain_env_.SetTime(daisysp::ADENV_SEG_ATTACK, 0.0003f);
+        grain_env_.SetCurve(kPercCurve);
+        grain_env_.SetMax(1.f); grain_env_.SetMin(0.f);
+        Retime();
+    }
+
+    void Trigger(float velocity) override
+    {
+        vel_ = velocity;
+        // Reproducible at SNAP 0, different every hit above it.
+        if(chaos_ <= 0.f)
+            rng_ = 0x9E3779B9u;
+        grains_left_ = 1 + static_cast<int>(chaos_ * 7.f);
+        active_      = true;
+        NextGrain();
+    }
+
+    float Process() override
+    {
+        if(!active_)
+            return 0.f;
+        const float e = grain_env_.Process();
+        if(!grain_env_.IsRunning() && e <= 0.f)
+        {
+            if(--grains_left_ <= 0)
+            {
+                active_ = false;
+                return 0.f;
+            }
+            NextGrain();
+        }
+
+        phase_ += hz_ / sr_;
+        if(phase_ >= 1.f)
+            phase_ -= 1.f;
+        // Square rather than sine: the crusher has something to bite on, and a
+        // glitch is meant to be edgy rather than round.
+        const float raw = (phase_ < duty_ ? 1.f : -1.f) * e;
+        return Shape(crush_.Process(raw) * vel_ * 0.5f);
+    }
+
+  protected:
+    void OnParam(ParamId id, float v) override
+    {
+        switch(id)
+        {
+            case ParamId::Tune:  base_hz_ = 80.f + v * 1600.f; break;
+            case ParamId::Decay: Retime(); break;
+            case ParamId::Tone:
+                crush_.SetBitcrushFactor(0.15f + v * 0.85f);
+                crush_.SetDownsampleFactor(v * 0.6f);
+                break;
+            case ParamId::Snap:  chaos_ = v; break;
+            default: break;
+        }
+    }
+
+  private:
+    void Retime()
+    {
+        grain_s_ = 0.004f + DecayTime(param(ParamId::Decay)) * 0.12f;
+        grain_env_.SetTime(daisysp::ADENV_SEG_DECAY, grain_s_);
+    }
+
+    uint32_t Rand()
+    {
+        rng_ ^= rng_ << 13; rng_ ^= rng_ >> 17; rng_ ^= rng_ << 5;
+        return rng_;
+    }
+
+    void NextGrain()
+    {
+        // Ratios deliberately not harmonic: harmonic grains fuse into one tone,
+        // and the point is that they do not.
+        static constexpr float kRatio[8]
+            = {1.f, 1.47f, 2.09f, 0.63f, 3.17f, 4.41f, 0.41f, 6.73f};
+        const uint32_t r = Rand();
+        hz_    = base_hz_ * kRatio[r & 7u];
+        duty_  = 0.15f + ((r >> 8) & 0xFFu) / 255.f * 0.7f;
+        phase_ = 0.f;
+        grain_env_.Trigger();
+    }
+
+    daisysp::Decimator crush_;
+    daisysp::AdEnv     grain_env_;
+    uint32_t rng_ = 0x9E3779B9u;
+    float sr_ = 48000.f, phase_ = 0.f, hz_ = 440.f, duty_ = 0.5f;
+    float base_hz_ = 400.f, grain_s_ = 0.02f, chaos_ = 0.5f, vel_ = 1.f;
+    int   grains_left_ = 0;
+};
+
 } // namespace drom

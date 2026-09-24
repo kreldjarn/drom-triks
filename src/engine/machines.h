@@ -20,9 +20,14 @@
 
 namespace drom {
 
-/// Sized for the largest machine today (OpenHat, 608 B) with headroom. The
-/// static_assert in Make<> is what stops a new machine silently overflowing it.
-inline constexpr size_t kMachineBytes = 768;
+/// Sized for the largest machine with real headroom. The biggest today is
+/// SnareDrum808 at 728 B, because DaisySP's AnalogSnareDrum carries several
+/// resonators — at the original 768 that was 95 % full, which is not a margin.
+/// Twelve slots, so each 256 bytes here costs 3 kB of DTCM.
+///
+/// The static_assert in Make<> is what stops a new machine overflowing this
+/// silently; it fails the build rather than the instrument.
+inline constexpr size_t kMachineBytes = 1024;
 
 /// One track's machine, constructed in place.
 class MachineSlot
@@ -49,8 +54,10 @@ class MachineSlot
         switch(id)
         {
             case MachineId::BdAnalog:  voice_ = Make<BassDrum>();       break;
+            case MachineId::Bd909:     voice_ = Make<BassDrum909>();    break;
             case MachineId::BdBoom:    voice_ = Make<BassDrumBoom>();   break;
             case MachineId::SdSynth:   voice_ = Make<SnareDrum>();      break;
+            case MachineId::Sd808:     voice_ = Make<SnareDrum808>();   break;
             case MachineId::SdPunch:   voice_ = Make<SnareDrumPunch>(); break;
             case MachineId::HatClosed: voice_ = Make<ClosedHat>();      break;
             case MachineId::HatOpen:   voice_ = Make<OpenHat>();        break;
@@ -58,6 +65,7 @@ class MachineSlot
             case MachineId::Clap:      voice_ = Make<drom::Clap>();     break;
             case MachineId::RimShot:   voice_ = Make<drom::RimShot>();  break;
             case MachineId::FmPerc:    voice_ = Make<FmVoice>();        break;
+            case MachineId::Glitch:    voice_ = Make<GlitchPerc>();     break;
             default:                   voice_ = Make<EmptySlot>();      break;
         }
         id_ = id;

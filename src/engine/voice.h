@@ -114,11 +114,15 @@ enum class MachineId : uint8_t
 {
     Silent = 0, ///< an unpopulated cartridge slot, or a deliberately dead track
 
-    BdAnalog,   ///< 808-style, tuned for punch
+    BdAnalog,   ///< 808: long sine, pitch envelope, minimal click
+    Bd909,      ///< 909: fast drop, short tail, beater click on top
     BdBoom,     ///< deep sine, long tail, slow sweep
 
     SdSynth,    ///< 909-style, balanced noise and body
+    Sd808,      ///< the 808 model, with the envelope that makes DECAY work
     SdPunch,    ///< transient-forward crack over a fast-dropping body
+
+    Glitch,     ///< bursts of crushed grains at unrelated pitches
 
     HatClosed,
     HatOpen,
@@ -139,8 +143,9 @@ struct MachineInfo
 
 inline constexpr MachineInfo kMachineInfo[static_cast<int>(MachineId::Count)] = {
     {"SILENT",   "--"},
-    {"BD 808",   "BD"},  {"BD BOOM", "BD"},
-    {"SD 909",   "SD"},  {"SD PUNCH", "SD"},
+    {"BD 808",   "BD"},  {"BD 909",  "BD"},  {"BD BOOM", "BD"},
+    {"SD 909",   "SD"},  {"SD 808",  "SD"},  {"SD PUNCH", "SD"},
+    {"GLITCH",   "PERC"},
     {"CH",       "HAT"}, {"OH",      "HAT"},
     {"TOM",      "PERC"},{"CLAP",    "PERC"},
     {"RIM",      "PERC"},{"FM",      "PERC"},

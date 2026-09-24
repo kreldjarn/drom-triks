@@ -168,12 +168,22 @@ outgrowing the slot silently.
 
 | Machine | Character |
 | --- | --- |
-| `BD 808` | the model above, tuned for punch |
-| `BD BOOM` | deep sine, long tail, slow sweep — **263 ms against 141 ms at DECAY 0.5, with a third the zero crossings** |
-| `SD 909` | balanced noise and body |
-| `SD PUNCH` | transient-forward — **68 ms against 443 ms**, and its noise dies rather than hissing on |
-| `CH` `OH` `TOM` `CLAP` `RIM` `FM` | as the table above |
-| `SILENT` | an unpopulated cartridge slot, or a deliberately dead track |
+| Machine | −40 dB @ DECAY 0.5 | Character |
+| --- | ---: | --- |
+| `BD 808` | 141 ms | the Mutable-derived model above: long sine, pitch envelope, little click |
+| `BD 909` | 101 ms | fast drop under a short tail, with a separate beater click. Hits hardest — peak 0.45 against 0.30 |
+| `BD BOOM` | 263 ms | deep sine, long sweep. **1089 ms at DECAY 0.85 against the 808's 496** |
+| `SD 909` | 443 ms | balanced noise and body |
+| `SD 808` | 74 ms | the 808 model with the envelope that makes DECAY work — see below |
+| `SD PUNCH` | 68 ms | transient-forward; its noise dies rather than hissing on |
+| `GLITCH` | 49–339 ms | bursts of crushed square grains at deliberately inharmonic ratios |
+| `CH` `OH` `TOM` `CLAP` `RIM` `FM` | | as the table above |
+| `SILENT` | | an unpopulated cartridge slot, or a deliberately dead track |
+
+**`GLITCH`'s SNAP is a chaos control, and it reaches both ends on purpose.** At zero the RNG seed
+resets on every trigger, so a hit is bit-identical each time and a pattern is reproducible. Above
+zero the seed advances per hit and no two are alike. A machine that never repeats is fun and
+impossible to arrange with, so the knob has to reach both.
 
 The selection lives in the `Kit` as a `uint8_t` per track, so it survives a save and is
 **range-checked on load** — a byte out of flash is not a guarantee. Changing machine rebinds the
@@ -218,7 +228,7 @@ behind its own trigger. [Doc 05 §4.2](05-analog-expansion.md#42-why-the-bus-cho
 has the full argument.
 
 All twelve machines are statically allocated. `Machine` is now **46.2 kB** — the patch at 30.1 kB
-plus twelve 784-byte machine slots, the voice slots, the channel strips and the queue. With
+plus twelve 1 kB machine slots, the voice slots, the channel strips and the queue. With
 `Storage`'s staging buffer that is roughly 76 kB of the 128 kB DTCM, so the rule that neither is
 ever a stack local matters more than it did at 21.5 kB, not less.
 
@@ -269,8 +279,19 @@ DECAY      0.00   0.10   0.25   0.50   0.75   1.00
 ```
 
 `SyntheticSnareDrum` behaves: 103 ms at DECAY 0 rising smoothly to seconds at full. That is what
-track 2 uses. If the analog model is ever wanted for its 808 character, it needs an amplitude
-envelope wrapped around it to make DECAY authoritative — the model will not do it alone.
+the `SD 909` machine uses.
+
+**The wrapper this section proposed now exists.** `SD 808` holds the model's own decay fixed — it
+is a timbre control there, not a time one — and gates the output with an `AdEnv` driven by the
+DECAY macro. Measured across the knob:
+
+```
+DECAY      0.00   0.25   0.50   0.75   1.00
+-40 dB ms    11     29     73    142    292
+```
+
+Monotonic, a 26× range, and 11 ms at DECAY 0 where the bare model gave 988. A test asserts all
+three properties, because the failure it guards against is a knob that looks connected and is not.
 
 Every other DaisySP voice scales correctly, so this is specific to that one class rather than a
 general problem with the library.

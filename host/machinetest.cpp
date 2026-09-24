@@ -344,6 +344,51 @@ int main()
               "loading restores the machine the patch was saved with");
     }
 
+    std::printf("\nDECAY is authoritative on the wrapped 808 snare:\n");
+    {
+        // docs/02-firmware.md 5 measures the bare AnalogSnareDrum as ringing for
+        // about a second at DECAY 0, never falling below -40 dB inside five
+        // seconds, and not even monotonic. SnareDrum808 wraps it in an
+        // amplitude envelope specifically to fix that, so the knob has to be
+        // monotonic or the wrapper is not earning its place.
+        auto Tail = [](MachineId id, float decay) {
+            static MachineSlot slot;
+            slot.Init(48000.f, id);
+            IVoice *v = slot.voice();
+            v->SetParam(ParamId::Decay, decay);
+            v->SetParam(ParamId::Level, 0.8f);
+            v->SetParam(ParamId::Drive, 0.f);
+            v->Trigger(1.f);
+            static float buf[48000 * 5];
+            float        peak = 0.f;
+            for(int i = 0; i < 48000 * 5; ++i)
+            {
+                buf[i] = v->Process();
+                const float a = std::fabs(buf[i]);
+                if(a > peak) peak = a;
+            }
+            for(int i = 48000 * 5 - 1; i >= 0; --i)
+                if(std::fabs(buf[i]) > peak * 0.01f)
+                    return i / 48.f; // ms
+            return 0.f;
+        };
+
+        const float d[5] = {0.f, 0.25f, 0.5f, 0.75f, 1.f};
+        float       ms[5];
+        for(int i = 0; i < 5; ++i)
+            ms[i] = Tail(MachineId::Sd808, d[i]);
+        std::printf("      -40 dB ms at DECAY 0/.25/.5/.75/1: "
+                    "%.0f %.0f %.0f %.0f %.0f\n",
+                    ms[0], ms[1], ms[2], ms[3], ms[4]);
+
+        bool monotonic = true;
+        for(int i = 1; i < 5; ++i)
+            monotonic &= ms[i] > ms[i - 1];
+        Check(monotonic, "every step of the knob lengthens the tail");
+        Check(ms[0] < 100.f, "and DECAY 0 is short rather than a second of ring");
+        Check(ms[4] > 4.f * ms[0], "with real range end to end");
+    }
+
     std::printf("\nqueue overflow is survivable:\n");
     {
         static Machine m; m.Init(48000.f);
