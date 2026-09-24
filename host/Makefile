@@ -89,11 +89,11 @@ $(BUILD_DIR)/lfotest: lfotest.cpp $(ENGINE_HDRS)
 	@mkdir -p $(BUILD_DIR)
 	$(CXX) $(CXXFLAGS) lfotest.cpp -o $@
 
-$(BUILD_DIR)/fxtest: fxtest.cpp $(ENGINE_HDRS)
+$(BUILD_DIR)/fxtest: fxtest.cpp $(ENGINE_HDRS) $(DSP_LIB)
 	@mkdir -p $(BUILD_DIR)
 	$(CXX) $(CXXFLAGS) fxtest.cpp $(DSP_LIB) -o $@
 
-$(BUILD_DIR)/striptest: striptest.cpp $(ENGINE_HDRS)
+$(BUILD_DIR)/striptest: striptest.cpp $(ENGINE_HDRS) $(DSP_LIB)
 	@mkdir -p $(BUILD_DIR)
 	$(CXX) $(CXXFLAGS) striptest.cpp $(DSP_LIB) -o $@
 
