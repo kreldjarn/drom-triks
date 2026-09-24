@@ -1,17 +1,22 @@
 #pragma once
 #include <cmath>
 #include <cstdint>
+#include "../io/storage_layout.h"
 #include "../machine.h"
 
 namespace drom {
 
-/// Six macro encoders, one per ParamId. The two navigation encoders
-/// (value/tempo, nav/page) are separate and do not address parameters.
-inline constexpr int kNumMacros   = 6;
+/// Eight macro encoders addressing one page at a time. The two navigation
+/// encoders (value/tempo, nav/page) are separate and do not address parameters.
+///
+/// Macros used to map 1:1 onto ParamId. They no longer can: the parameter space
+/// is four pages deep and the panel is one page wide, so the mapping goes
+/// through `page_`. See docs/01-hardware.md §2.
+inline constexpr int kNumMacros   = kParamsPerPage;
 inline constexpr int kNumStepKeys = 16;
 
-static_assert(kNumMacros == static_cast<int>(ParamId::Count),
-              "one macro encoder per parameter");
+static_assert(kNumMacros == kParamsPerPage,
+              "one macro encoder per parameter slot on a page");
 
 /// Panel state machine. Pure logic: it takes debounced key edges and encoder
 /// detents and emits Commands. No hardware, no drawing — which is what lets
@@ -31,12 +36,42 @@ class Ui
     {
         Play = 0, ///< step keys toggle steps on the selected track
         Mute,     ///< track keys mute/unmute instead of selecting
+        Pattern,  ///< step keys load a pattern; with SHIFT, save one
     };
+
+    /// The six transport keys. MUTE and PATTERN are **held**, like SHIFT, for
+    /// the reason the class comment gives: a held modifier has no state to get
+    /// stuck in, and on an instrument you play that matters more than saving a
+    /// finger.
+    enum class Key : uint8_t
+    {
+        Play = 0, Rec, Shift, Patt, Song, Tap
+    };
+
+    /// Flash work the main loop must do. The UI cannot touch Storage itself:
+    /// a QSPI write stalls for milliseconds, so it belongs nowhere near the
+    /// audio callback, and the patch has to be snapshotted by the audio side
+    /// first anyway. See docs/02-firmware.md §8.
+    struct StorageRequest
+    {
+        enum class Type : uint8_t { None = 0, SavePattern, LoadPattern };
+        Type    type = Type::None;
+        uint8_t slot = 0;
+    };
+
+    /// Returns the pending request and clears it. Poll once per main-loop pass.
+    StorageRequest TakeStorageRequest()
+    {
+        const StorageRequest r = storage_req_;
+        storage_req_           = StorageRequest{};
+        return r;
+    }
 
     void Init(Machine *machine)
     {
         machine_ = machine;
         mode_  = Mode::Play;
+        page_           = 0;
         selected_track_ = 0;
         held_step_      = -1;
         shift_          = false;
@@ -57,6 +92,104 @@ class Ui
 
     void SetMode(Mode m) { mode_ = m; }
 
+    /// Select which page the eight macro encoders address.
+    ///
+    /// Ends any gesture in flight for the same reason a track change does: the
+    /// encoders now point somewhere else, and a spin spanning the change would
+    /// write the old page's accumulated value to the new page's parameter.
+    void SetPage(int page)
+    {
+        if(page < 0 || page >= kNumPages || page == page_)
+            return;
+        page_ = page;
+        EndGestures();
+    }
+
+    int page() const { return page_; }
+
+    /// The parameter macro encoder `enc` currently addresses.
+    ParamId ParamForMacro(int enc) const
+    {
+        return ParamAt(page_, (enc < 0 || enc >= kNumMacros) ? 0 : enc);
+    }
+
+    void TransportPress(Key k)
+    {
+        if(!machine_)
+            return;
+        switch(k)
+        {
+            case Key::Shift: shift_ = true; EndGestures(); break;
+            case Key::Patt:  mode_ = Mode::Pattern; break;
+            case Key::Play:  Transport(); break;
+            case Key::Rec:   rec_armed_ = !rec_armed_; break;
+            case Key::Tap:   Tap(); break;
+            case Key::Song:  break; // song mode is Phase 7
+        }
+    }
+
+    void TransportRelease(Key k)
+    {
+        switch(k)
+        {
+            // Releasing SHIFT changes what every macro points at, exactly like
+            // a page change, so any gesture in flight has to re-seed.
+            case Key::Shift: shift_ = false; EndGestures(); break;
+            case Key::Patt:  if(mode_ == Mode::Pattern) mode_ = Mode::Play; break;
+            default: break;
+        }
+    }
+
+    /// Set or clear MUTE. Held, like PATTERN.
+    void SetMuteHeld(bool held)
+    {
+        mode_ = held ? Mode::Mute : (mode_ == Mode::Mute ? Mode::Play : mode_);
+    }
+
+    /// The two navigation encoders. 0 is value/tempo, 1 is page.
+    void NavTurn(int nav, int delta)
+    {
+        if(!machine_ || delta == 0)
+            return;
+        // Clamp rather than reject. A detent is normally +/-1, but the scan
+        // coalesces a fast spin into a larger delta — and rejecting that would
+        // mean a quick flick near either end does nothing at all, which reads
+        // as a dead encoder.
+        if(nav == 1)
+        {
+            // While SHIFT is held the macros are on master FX, so the page
+            // encoder picks which bank of eight rather than which page.
+            if(shift_)
+                SetFxBank(Clampi(fx_bank_ + delta, 0, kNumFxParams / kNumMacros - 1));
+            else
+                SetPage(Clampi(page_ + delta, 0, kNumPages - 1));
+            return;
+        }
+        if(mode_ == Mode::Pattern)
+        {
+            SetPatternBank(Clampi(pattern_bank_ + delta, 0,
+                                  static_cast<int>(kPatternSlots) / kNumStepKeys - 1));
+            return;
+        }
+        Command c;
+        c.type  = Command::Type::SetTempo;
+        c.value = Clampf(machine_->state().tempo.load(std::memory_order_relaxed)
+                             + static_cast<float>(delta),
+                         20.f, 300.f);
+        machine_->Push(c);
+    }
+
+    /// Pushing a macro encoder returns its parameter to the default. The push
+    /// switches come free on the chain (hardware §3.3) and this is the obvious
+    /// use for them.
+    void EncoderPush(int enc)
+    {
+        const Target t = TargetFor(enc);
+        if(t.kind == Target::Kind::None || !machine_)
+            return;
+        Emit(enc, t, DefaultFor(t));
+    }
+
     void TrackPress(int track)
     {
         if(track < 0 || track >= kNumTracks)
@@ -71,7 +204,7 @@ class Ui
             return;
         }
         // No pickup logic on a track change: an endless encoder has no
-        // physical position to strand, so the six macros simply address the
+        // physical position to strand, so the macros simply address the
         // new track's values from the next detent onward. The in-flight edit
         // values must still be dropped, or a gesture continuing across the
         // change would apply the old track's value to the new one.
@@ -86,6 +219,17 @@ class Ui
     {
         if(step < 0 || step >= kNumStepKeys || !machine_)
             return;
+
+        // In PATTERN mode a step key is a slot, not a step. Sixteen keys over
+        // 128 slots, so the value encoder picks the bank.
+        if(mode_ == Mode::Pattern)
+        {
+            storage_req_.slot = static_cast<uint8_t>(pattern_bank_ * kNumStepKeys + step);
+            storage_req_.type = shift_ ? StorageRequest::Type::SavePattern
+                                       : StorageRequest::Type::LoadPattern;
+            return;
+        }
+
         held_step_ = step;
 
         // A held step is a p-lock target, not a toggle — the toggle happens on
@@ -100,7 +244,7 @@ class Ui
 
     void StepRelease(int step)
     {
-        if(step != held_step_)
+        if(mode_ == Mode::Pattern || step != held_step_)
             return;
         if(!wrote_lock_while_held_ && !shift_)
             ToggleStep(step);
@@ -122,7 +266,9 @@ class Ui
         if(enc < 0 || enc >= kNumMacros || !machine_ || delta == 0)
             return;
 
-        const ParamId id = static_cast<ParamId>(enc);
+        const Target tgt = TargetFor(enc);
+        if(tgt.kind == Target::Kind::None)
+            return; // a declared-but-unwired slot writes nothing and claims no screen
 
         // Continue from what we last pushed if the knob is still being turned,
         // rather than re-reading the patch. The command queue is drained by the
@@ -136,33 +282,50 @@ class Ui
         const bool continuing
             = turning_[enc] && (now_ms_ - last_turn_ms_[enc] <= kEditContinueMs);
 
-        float v = continuing ? edit_value_[enc] : CurrentValue(id);
+        float v = continuing ? edit_value_[enc] : CurrentValueFor(tgt);
         v += delta * (continuing ? StepFor(enc) : kFineStep);
-        if(v < 0.f) v = 0.f;
-        if(v > 1.f) v = 1.f;
-
-        edit_value_[enc]   = v;
-        last_turn_ms_[enc] = now_ms_;
-        turning_[enc]      = true;
-        last_macro_        = enc;
-        last_macro_ms_     = now_ms_;
-
-        Command c;
-        c.track = static_cast<uint8_t>(selected_track_);
-        c.param = static_cast<uint8_t>(enc);
-        c.value = v;
-        if(held_step_ >= 0)
-        {
-            c.type = Command::Type::SetStepLock;
-            c.step = static_cast<uint8_t>(held_step_);
-            wrote_lock_while_held_ = true;
-        }
-        else
-        {
-            c.type = Command::Type::SetKitParam;
-        }
-        machine_->Push(c);
+        Emit(enc, tgt, Clampf(v, 0.f, 1.f));
     }
+
+    /// What a macro encoder is pointing at right now.
+    ///
+    /// Three layers, resolved in this order:
+    ///   SHIFT + a held step -> that step's detail (velocity, micro, ...)
+    ///   SHIFT alone         -> master FX
+    ///   neither             -> the current page's parameter for this track
+    ///
+    /// One rule to remember rather than three: SHIFT makes a knob global,
+    /// unless you are already holding a step, in which case it makes it local
+    /// to that step.
+    struct Target
+    {
+        enum class Kind : uint8_t { None = 0, Param, Fx, StepField };
+        Kind    kind  = Kind::None;
+        uint8_t index = 0;
+    };
+
+    Target TargetFor(int enc) const
+    {
+        if(enc < 0 || enc >= kNumMacros || !machine_)
+            return {};
+        if(shift_ && held_step_ >= 0)
+        {
+            if(enc >= static_cast<int>(StepField::Count))
+                return {};
+            return {Target::Kind::StepField, static_cast<uint8_t>(enc)};
+        }
+        if(shift_)
+        {
+            const int i = fx_bank_ * kNumMacros + enc;
+            return FxReserved(i) ? Target{}
+                                 : Target{Target::Kind::Fx, static_cast<uint8_t>(i)};
+        }
+        const ParamId id = ParamAt(page_, enc);
+        return ParamReserved(id)
+                   ? Target{}
+                   : Target{Target::Kind::Param, static_cast<uint8_t>(id)};
+    }
+
 
     // ---- state, for the display and LEDs -----------------------------------
 
@@ -170,6 +333,9 @@ class Ui
     int  selected_track() const { return selected_track_; }
     int  held_step() const { return held_step_; }
     bool shift() const { return shift_; }
+    bool rec_armed() const { return rec_armed_; }
+    int  fx_bank() const { return fx_bank_; }
+    int  pattern_bank() const { return pattern_bank_; }
 
     float value(ParamId id) const { return StoredValue(id); }
 
@@ -268,15 +434,174 @@ class Ui
         machine_->Push(c);
     }
 
+    static int Clampi(int v, int lo, int hi)
+    {
+        return v < lo ? lo : (v > hi ? hi : v);
+    }
+
+    static float Clampf(float v, float lo, float hi)
+    {
+        return v < lo ? lo : (v > hi ? hi : v);
+    }
+
+    /// Normalised current value of whatever the target points at.
+    float CurrentValueFor(const Target &t) const
+    {
+        switch(t.kind)
+        {
+            case Target::Kind::Fx: return machine_->patch().kit.fx[t.index];
+            case Target::Kind::StepField: return StepFieldValue(t.index);
+            case Target::Kind::Param:
+                return CurrentValue(static_cast<ParamId>(t.index));
+            default: return 0.f;
+        }
+    }
+
+    float DefaultFor(const Target &t) const
+    {
+        switch(t.kind)
+        {
+            case Target::Kind::Fx:    return kFxDefault[t.index];
+            case Target::Kind::Param: return kParamInfo[t.index].def;
+            // Centre for the bipolar one, full for the rest — "default" for a
+            // step field means "as if you had never touched it".
+            case Target::Kind::StepField:
+                return static_cast<StepField>(t.index) == StepField::Micro ? 0.5f : 1.f;
+            default: return 0.f;
+        }
+    }
+
+    float StepFieldValue(uint8_t field) const
+    {
+        if(!Valid(held_step_))
+            return 0.f;
+        const Step &s = CurrentTrack().steps[held_step_];
+        switch(static_cast<StepField>(field))
+        {
+            case StepField::Velocity:    return static_cast<float>(s.velocity) / 127.f;
+            case StepField::Micro:
+                return (static_cast<float>(s.micro) / static_cast<float>(kMicroRange)
+                        + 1.f) * 0.5f;
+            case StepField::Probability: return static_cast<float>(s.probability) / 100.f;
+            case StepField::Ratchet:     return static_cast<float>(s.ratchet - 1) / 7.f;
+            default: return 0.f;
+        }
+    }
+
+    /// Records the gesture and pushes the command the target implies.
+    void Emit(int enc, const Target &tgt, float v)
+    {
+        edit_value_[enc]   = v;
+        last_turn_ms_[enc] = now_ms_;
+        turning_[enc]      = true;
+        last_macro_        = enc;
+        last_macro_ms_     = now_ms_;
+
+        Command c;
+        c.track = static_cast<uint8_t>(selected_track_);
+        c.param = tgt.index;
+        c.value = v;
+        switch(tgt.kind)
+        {
+            case Target::Kind::Fx:
+                c.type = Command::Type::SetFxParam;
+                break;
+            case Target::Kind::StepField:
+                c.type = Command::Type::SetStepField;
+                c.step = static_cast<uint8_t>(held_step_);
+                // Step detail is not a p-lock, so it must not suppress the
+                // toggle-on-release: you held the step to edit it, not to
+                // turn it off.
+                break;
+            default:
+                if(held_step_ >= 0)
+                {
+                    c.type = Command::Type::SetStepLock;
+                    c.step = static_cast<uint8_t>(held_step_);
+                    wrote_lock_while_held_ = true;
+                }
+                else
+                    c.type = Command::Type::SetKitParam;
+                break;
+        }
+        machine_->Push(c);
+    }
+
+    void SetFxBank(int bank)
+    {
+        const int n = kNumFxParams / kNumMacros;
+        if(bank < 0 || bank >= n || bank == fx_bank_)
+            return;
+        fx_bank_ = bank;
+        EndGestures();
+    }
+
+    void SetPatternBank(int bank)
+    {
+        const int n = static_cast<int>(kPatternSlots) / kNumStepKeys;
+        if(bank < 0 || bank >= n)
+            return;
+        pattern_bank_ = bank;
+    }
+
+    void Transport()
+    {
+        Command c;
+        c.type = machine_->state().playing.load(std::memory_order_relaxed)
+                     ? Command::Type::Stop
+                     : Command::Type::Start;
+        machine_->Push(c);
+    }
+
+    /// Tap tempo over a rolling average of the last few intervals.
+    ///
+    /// A gap longer than kTapTimeoutMs restarts the average rather than folding
+    /// a pause into it — otherwise the first tap after a rest drags the tempo
+    /// down by however long you hesitated.
+    void Tap()
+    {
+        if(last_tap_ms_ != 0 && now_ms_ - last_tap_ms_ <= kTapTimeoutMs)
+        {
+            const uint32_t interval = now_ms_ - last_tap_ms_;
+            tap_sum_ += interval;
+            ++tap_count_;
+            if(tap_count_ >= 1)
+            {
+                const float ms  = static_cast<float>(tap_sum_)
+                                  / static_cast<float>(tap_count_);
+                Command        c;
+                c.type  = Command::Type::SetTempo;
+                c.value = Clampf(60000.f / ms, 20.f, 300.f);
+                machine_->Push(c);
+            }
+        }
+        else
+        {
+            tap_sum_   = 0;
+            tap_count_ = 0;
+        }
+        last_tap_ms_ = now_ms_;
+    }
+
+    static constexpr uint32_t kTapTimeoutMs = 2000;
+
     Machine *machine_       = nullptr;
     Mode     mode_          = Mode::Play;
     uint32_t now_ms_        = 0;
     uint32_t last_macro_ms_ = 0;
     int      last_macro_    = -1;
+    int      page_          = 0;
     int    selected_track_ = 0;
     int    held_step_      = -1;
     bool   shift_          = false;
     bool   wrote_lock_while_held_ = false;
+    bool   rec_armed_      = false;
+    int    fx_bank_        = 0;
+    int    pattern_bank_   = 0;
+    uint32_t last_tap_ms_  = 0;
+    uint32_t tap_sum_      = 0;
+    uint32_t tap_count_    = 0;
+    StorageRequest storage_req_{};
     float    edit_value_[kNumMacros]   = {};
     uint32_t last_turn_ms_[kNumMacros] = {};
     bool     turning_[kNumMacros]      = {};

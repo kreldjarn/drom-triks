@@ -110,7 +110,7 @@ OSStatus RenderCallback(void                       *,
     // This is the real-time thread. Machine::Process drains the command queue
     // and renders; it allocates nothing and takes no locks, which is the whole
     // point of the architecture.
-    static float mono[kMaxChunk];
+    static float stereo[kMaxChunk * 2]; // interleaved L,R
 
     float *l = static_cast<float *>(io->mBuffers[0].mData);
     float *r = io->mNumberBuffers > 1 ? static_cast<float *>(io->mBuffers[1].mData) : nullptr;
@@ -126,12 +126,12 @@ OSStatus RenderCallback(void                       *,
     while(done < frames)
     {
         const UInt32 n = (frames - done) < kMaxChunk ? (frames - done) : kMaxChunk;
-        g_machine.Process(mono, n);
+        g_machine.Process(stereo, n);
         for(UInt32 i = 0; i < n; ++i)
         {
-            l[done + i] = mono[i];
+            l[done + i] = stereo[2 * i];
             if(r)
-                r[done + i] = mono[i];
+                r[done + i] = stereo[2 * i + 1];
         }
         done += n;
     }

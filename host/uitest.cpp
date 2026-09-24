@@ -28,7 +28,7 @@ void Check(bool ok, const char *what)
 /// have to pump the machine, which is the real path and worth exercising.
 void Pump(Machine &m)
 {
-    float buf[32];
+    float buf[64]; // 32 frames, interleaved stereo
     m.Process(buf, 32);
 }
 
@@ -188,6 +188,174 @@ int main()
         Check(ui.selected_track() == 3, "and do not change the selection");
         ui.TrackPress(3); Pump(m);
         Check(!ui.track_muted(3), "pressing again unmutes");
+    }
+
+    std::printf("\nnavigation encoders:\n");
+    {
+        static Machine m; static Ui ui;
+        m.Init(48000.f); ui.Init(&m); ui.SetTime(1000);
+
+        ui.NavTurn(1, 1);
+        Check(ui.page() == 1, "nav 1 moves to the next page");
+        ui.NavTurn(1, 2);
+        Check(ui.page() == 3, "and keeps going");
+        ui.NavTurn(1, 5);
+        Check(ui.page() == 3, "but stops at the last page rather than wrapping");
+        ui.NavTurn(1, -99);
+        Check(ui.page() == 0, "and at the first going the other way");
+
+        const float before = m.state().tempo.load(std::memory_order_relaxed);
+        ui.NavTurn(0, 5);
+        Pump(m);
+        Check(m.state().tempo.load(std::memory_order_relaxed) > before,
+              "nav 0 changes the tempo");
+    }
+
+    std::printf("\nSHIFT puts the macros on master FX:\n");
+    {
+        static Machine m; static Ui ui;
+        m.Init(48000.f); ui.Init(&m); ui.SetTime(1000);
+
+        ui.TransportPress(Ui::Key::Shift);
+        ui.SetTime(1100);
+        ui.EncoderTurn(1, 4); // bank 0, slot 1 = DelayFeedback
+        Pump(m);
+        Check(m.patch().kit.fx[static_cast<int>(FxId::DelayFeedback)] > 0.35f,
+              "a macro writes a master FX parameter");
+        Check(m.patch().kit.params[0][static_cast<int>(ParamId::Decay)] == 0.5f,
+              "and leaves the per-track parameter alone");
+
+        // The page encoder picks the FX bank while SHIFT is down.
+        ui.NavTurn(1, 1);
+        Check(ui.fx_bank() == 1, "nav 1 selects the second FX bank");
+        Check(ui.page() == 0, "without moving the page underneath");
+        ui.SetTime(1200);
+        // Downward: CompThreshold defaults to 1.0, so turning up just clamps.
+        ui.EncoderTurn(0, -4); // bank 1, slot 0 = CompThreshold
+        Pump(m);
+        Check(m.patch().kit.fx[static_cast<int>(FxId::CompThreshold)] != 1.0f,
+              "and bank 1 reaches the compressor");
+
+        ui.TransportRelease(Ui::Key::Shift);
+        ui.SetTime(1300);
+        ui.EncoderTurn(1, 4);
+        Pump(m);
+        Check(m.patch().kit.params[0][static_cast<int>(ParamId::Decay)] != 0.5f,
+              "releasing SHIFT hands the macros back to the track");
+    }
+
+    std::printf("\nSHIFT + a held step is step detail:\n");
+    {
+        static Machine m; static Ui ui;
+        m.Init(48000.f); ui.Init(&m); ui.SetTime(1000);
+
+        ui.StepPress(4);
+        ui.TransportPress(Ui::Key::Shift);
+        ui.SetTime(1100);
+        ui.EncoderTurn(static_cast<int>(StepField::Probability), -20);
+        Pump(m);
+        Check(m.patch().pattern.tracks[0].steps[4].probability < 100,
+              "a macro edits that step's probability");
+        Check(m.patch().kit.fx[static_cast<int>(FxId::ReverbSize)] == kFxDefault[4],
+              "and not master FX, even though SHIFT is held");
+
+        // Step detail is not a p-lock, so releasing still toggles the step —
+        // you held it to edit it, not to turn it off.
+        ui.TransportRelease(Ui::Key::Shift);
+        ui.StepRelease(4);
+        Pump(m);
+        Check(m.patch().pattern.tracks[0].steps[4].active(),
+              "and the step still toggles on release");
+    }
+
+    std::printf("\npush to default:\n");
+    {
+        static Machine m; static Ui ui;
+        m.Init(48000.f); ui.Init(&m); ui.SetTime(1000);
+
+        ui.EncoderTurn(0, 30); // TUNE well away from its default
+        Pump(m);
+        Check(m.patch().kit.params[0][0] != 0.5f, "a macro moves off the default");
+        ui.EncoderPush(0);
+        Pump(m);
+        Check(m.patch().kit.params[0][0] == 0.5f, "and the push restores it");
+    }
+
+    std::printf("\ntransport:\n");
+    {
+        static Machine m; static Ui ui;
+        m.Init(48000.f); ui.Init(&m); ui.SetTime(1000);
+
+        Check(!m.state().playing.load(std::memory_order_relaxed), "starts stopped");
+        ui.TransportPress(Ui::Key::Play); Pump(m);
+        Check(m.state().playing.load(std::memory_order_relaxed), "PLAY starts it");
+        ui.TransportPress(Ui::Key::Play); Pump(m);
+        Check(!m.state().playing.load(std::memory_order_relaxed), "and stops it again");
+
+        Check(!ui.rec_armed(), "REC starts disarmed");
+        ui.TransportPress(Ui::Key::Rec);
+        Check(ui.rec_armed(), "and arms");
+    }
+
+    std::printf("\ntap tempo:\n");
+    {
+        static Machine m; static Ui ui;
+        m.Init(48000.f); ui.Init(&m);
+
+        // Four taps 500 ms apart is 120 BPM.
+        for(uint32_t i = 0; i < 4; ++i)
+        {
+            ui.SetTime(10000 + i * 500);
+            ui.TransportPress(Ui::Key::Tap);
+        }
+        Pump(m);
+        const float bpm = m.state().tempo.load(std::memory_order_relaxed);
+        Check(std::fabs(bpm - 120.f) < 1.f, "four taps at 500 ms give 120 BPM");
+
+        // A long pause restarts the average rather than folding the rest in.
+        ui.SetTime(30000);
+        ui.TransportPress(Ui::Key::Tap);
+        Pump(m);
+        Check(std::fabs(m.state().tempo.load(std::memory_order_relaxed) - bpm) < 0.01f,
+              "and a long gap is discarded, not averaged in");
+    }
+
+    std::printf("\nPATTERN mode asks the main loop for flash work:\n");
+    {
+        static Machine m; static Ui ui;
+        m.Init(48000.f); ui.Init(&m); ui.SetTime(1000);
+
+        Check(ui.TakeStorageRequest().type == Ui::StorageRequest::Type::None,
+              "nothing pending to begin with");
+
+        ui.TransportPress(Ui::Key::Patt);
+        ui.StepPress(6);
+        auto r = ui.TakeStorageRequest();
+        Check(r.type == Ui::StorageRequest::Type::LoadPattern && r.slot == 6,
+              "a step key loads that slot");
+        Check(ui.TakeStorageRequest().type == Ui::StorageRequest::Type::None,
+              "and taking it clears it");
+
+        ui.TransportPress(Ui::Key::Shift);
+        ui.StepPress(6);
+        r = ui.TakeStorageRequest();
+        Check(r.type == Ui::StorageRequest::Type::SavePattern,
+              "with SHIFT it saves instead");
+        ui.TransportRelease(Ui::Key::Shift);
+
+        // 16 keys over 128 slots, so the value encoder banks them.
+        ui.NavTurn(0, 3);
+        Check(ui.pattern_bank() == 3, "nav 0 selects the pattern bank");
+        ui.StepPress(2);
+        r = ui.TakeStorageRequest();
+        Check(r.slot == 3 * 16 + 2, "and the slot is bank * 16 + key");
+
+        // A step key must not toggle a step while PATTERN is held.
+        Check(!m.patch().pattern.tracks[0].steps[2].active(),
+              "and no step was toggled");
+
+        ui.TransportRelease(Ui::Key::Patt);
+        Check(ui.mode() == Ui::Mode::Play, "releasing PATT returns to play");
     }
 
     std::printf("\n%s\n", failures ? "UI TESTS FAILED" : "all UI tests passed");

@@ -8,16 +8,22 @@ DAISYSP_DIR := ../lib/DaisySP
 BUILD_DIR   := build
 
 # DaisySP's headers include each other by bare filename, so every source
-# directory has to be on the include path.
-INCLUDES := $(addprefix -I,$(shell find $(DAISYSP_DIR)/Source -type d))
+# directory has to be on the include path. DaisySP-LGPL is a separate library
+# (LGPL-2.1, where DaisySP proper is MIT) and ships its own tree — we use its
+# ReverbSc and Compressor; see the note at the top of src/engine/fx.h.
+DAISYSP_LGPL_DIR := $(DAISYSP_DIR)/DaisySP-LGPL
+INCLUDES := $(addprefix -I,$(shell find $(DAISYSP_DIR)/Source -type d)) \
+            $(addprefix -I,$(shell find $(DAISYSP_LGPL_DIR)/Source -type d))
 # -pthread is for machinetest's real two-thread producer/consumer run. Apple
 # clang links std::thread without it; GCC on Linux does not, and CI is Linux.
 CXXFLAGS := -std=c++17 -O2 -Wall -pthread $(INCLUDES)
 
 # DaisySP is 40-odd files and never changes; build it once into an archive
 # rather than recompiling it for every target.
-DSP_SRCS := $(shell find $(DAISYSP_DIR)/Source -name '*.cpp')
-DSP_OBJS := $(patsubst $(DAISYSP_DIR)/Source/%.cpp,$(BUILD_DIR)/dsp/%.o,$(DSP_SRCS))
+DSP_SRCS      := $(shell find $(DAISYSP_DIR)/Source -name '*.cpp')
+DSP_LGPL_SRCS := $(shell find $(DAISYSP_LGPL_DIR)/Source -name '*.cpp')
+DSP_OBJS := $(patsubst $(DAISYSP_DIR)/Source/%.cpp,$(BUILD_DIR)/dsp/%.o,$(DSP_SRCS)) \
+            $(patsubst $(DAISYSP_LGPL_DIR)/Source/%.cpp,$(BUILD_DIR)/dsp-lgpl/%.o,$(DSP_LGPL_SRCS))
 DSP_LIB  := $(BUILD_DIR)/libdaisysp_host.a
 
 ENGINE_HDRS := $(wildcard ../src/engine/*.h) $(wildcard ../src/engine/voices/*.h) \
@@ -38,6 +44,10 @@ linux:
 	  make BUILD_DIR=build-linux test
 
 $(BUILD_DIR)/dsp/%.o: $(DAISYSP_DIR)/Source/%.cpp
+	@mkdir -p $(dir $@)
+	$(CXX) $(CXXFLAGS) -c $< -o $@
+
+$(BUILD_DIR)/dsp-lgpl/%.o: $(DAISYSP_LGPL_DIR)/Source/%.cpp
 	@mkdir -p $(dir $@)
 	$(CXX) $(CXXFLAGS) -c $< -o $@
 
@@ -71,14 +81,34 @@ $(BUILD_DIR)/locktest: locktest.cpp $(ENGINE_HDRS)
 	@mkdir -p $(BUILD_DIR)
 	$(CXX) $(CXXFLAGS) locktest.cpp -o $@
 
+$(BUILD_DIR)/storagetest: storagetest.cpp $(ENGINE_HDRS)
+	@mkdir -p $(BUILD_DIR)
+	$(CXX) $(CXXFLAGS) storagetest.cpp -o $@
+
+$(BUILD_DIR)/lfotest: lfotest.cpp $(ENGINE_HDRS)
+	@mkdir -p $(BUILD_DIR)
+	$(CXX) $(CXXFLAGS) lfotest.cpp -o $@
+
+$(BUILD_DIR)/fxtest: fxtest.cpp $(ENGINE_HDRS)
+	@mkdir -p $(BUILD_DIR)
+	$(CXX) $(CXXFLAGS) fxtest.cpp $(DSP_LIB) -o $@
+
+$(BUILD_DIR)/striptest: striptest.cpp $(ENGINE_HDRS)
+	@mkdir -p $(BUILD_DIR)
+	$(CXX) $(CXXFLAGS) striptest.cpp $(DSP_LIB) -o $@
+
 $(BUILD_DIR)/clocktest: clocktest.cpp $(ENGINE_HDRS)
 	@mkdir -p $(BUILD_DIR)
 	$(CXX) $(CXXFLAGS) clocktest.cpp -o $@
 
-.PHONY: seqtest locktest clocktest uitest machinetest uxtest play
+.PHONY: seqtest locktest clocktest storagetest lfotest striptest fxtest uitest machinetest uxtest play
 seqtest:     $(BUILD_DIR)/seqtest;     $<
 locktest:    $(BUILD_DIR)/locktest;    $<
 clocktest:   $(BUILD_DIR)/clocktest;   $<
+striptest:   $(BUILD_DIR)/striptest;   $<
+fxtest:      $(BUILD_DIR)/fxtest;      $<
+lfotest:     $(BUILD_DIR)/lfotest;     $<
+storagetest: $(BUILD_DIR)/storagetest; $<
 uitest:      $(BUILD_DIR)/uitest;      $<
 machinetest: $(BUILD_DIR)/machinetest; $<
 uxtest:      $(BUILD_DIR)/uxtest;      $<
@@ -88,10 +118,12 @@ run: $(BUILD_DIR)/render
 	$(BUILD_DIR)/render $(BUILD_DIR)/out.wav
 
 test: $(BUILD_DIR)/seqtest $(BUILD_DIR)/locktest $(BUILD_DIR)/clocktest \
-      $(BUILD_DIR)/uitest $(BUILD_DIR)/machinetest $(BUILD_DIR)/uxtest $(BUILD_DIR)/render
+      $(BUILD_DIR)/storagetest $(BUILD_DIR)/lfotest $(BUILD_DIR)/striptest $(BUILD_DIR)/fxtest $(BUILD_DIR)/uitest $(BUILD_DIR)/machinetest \
+      $(BUILD_DIR)/uxtest $(BUILD_DIR)/render
 	@$(BUILD_DIR)/seqtest && $(BUILD_DIR)/locktest && $(BUILD_DIR)/clocktest \
-	  && $(BUILD_DIR)/uitest && $(BUILD_DIR)/machinetest && $(BUILD_DIR)/uxtest \
-	  && $(BUILD_DIR)/render --selftest
+	  && $(BUILD_DIR)/storagetest && $(BUILD_DIR)/lfotest && $(BUILD_DIR)/striptest && $(BUILD_DIR)/fxtest \
+	  && $(BUILD_DIR)/uitest && $(BUILD_DIR)/machinetest \
+	  && $(BUILD_DIR)/uxtest && $(BUILD_DIR)/render --selftest
 
 clean:
 	rm -rf $(BUILD_DIR)

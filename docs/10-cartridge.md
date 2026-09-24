@@ -128,7 +128,7 @@ would already have severed.
 A 24AA02 at the standard address, reachable through the carrier's I²C switch. It carries:
 
 - **Name**, for the OLED — "808 BD" rather than "C1"
-- **Which of the six macros this card actually uses**, so the UI can grey out the rest rather than
+- **Which macros this card actually uses**, so the UI can grey out the rest rather than
   leaving knobs that appear to work and don't. [Hardware §2](01-hardware.md#2-panel-layout) is
   explicit that a dead knob is worse than a mild one, and the EEPROM is what makes that rule
   enforceable on a card that did not exist when the firmware shipped.

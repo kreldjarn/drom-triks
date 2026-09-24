@@ -9,11 +9,19 @@ namespace drom {
 /// Every track's base parameter values — the "sound" half of a patch.
 ///
 /// The cartridge tracks carry parameters like any other, so a kit stays
-/// meaningful across a cartridge swap: the six macros are normalised, so a
+/// meaningful across a cartridge swap: the macros are normalised, so a
 /// stored TUNE still means TUNE on whatever is plugged in.
 struct Kit
 {
     float params[kNumTracks][static_cast<int>(ParamId::Count)];
+
+    /// Master delay, reverb and compressor settings. Global rather than
+    /// per-track, and in the Kit rather than the Pattern because a kit is the
+    /// "sound" half of a patch and delay time is part of a sound. Frozen at 16
+    /// for the same reason ParamId is frozen at 32 — the count is baked into
+    /// sizeof(Patch). See docs/02-firmware.md §6.
+    float fx[kNumFxParams];
+
     char  name[16];
 };
 
@@ -30,7 +38,14 @@ inline constexpr uint32_t kPatchMagic = 0x4D4F5244; // 'DROM'
 /// size, so a v1 save read as v2 would be reinterpreted rather than rejected —
 /// exactly the failure SaveHeader exists to catch. `payload_size` alone would
 /// have caught this one, but only because the size happened to change.
-inline constexpr uint16_t kPatchVersion = 2;
+///
+/// Bumped to 3 for the format freeze: kMaxLocks 4 -> 8 (resizing Step) and
+/// ParamId::Count 6 -> 32 (resizing Kit). Both were taken at once, and
+/// deliberately before Phase 6 writes anything real to flash, because every
+/// such change invalidates every stored pattern. Anything that alters
+/// sizeof(Patch) belongs on this side of that line — see
+/// docs/02-firmware.md §6.
+inline constexpr uint16_t kPatchVersion = 3;
 
 /// Guards a saved struct against being read by a different firmware version.
 ///
@@ -58,6 +73,8 @@ inline void InitKit(Kit &k)
     for(int t = 0; t < kNumTracks; ++t)
         for(int p = 0; p < static_cast<int>(ParamId::Count); ++p)
             k.params[t][p] = kParamInfo[p].def;
+    for(int i = 0; i < kNumFxParams; ++i)
+        k.fx[i] = kFxDefault[i];
     std::memset(k.name, 0, sizeof(k.name));
 }
 

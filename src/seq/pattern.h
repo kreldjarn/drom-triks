@@ -55,6 +55,17 @@ struct Step
     bool accent() const { return (flags & kStepAccent) != 0; }
 };
 
+/// The per-step fields SHIFT + a held step exposes on the macro encoders.
+/// docs/02-firmware.md §7 calls this "step detail".
+enum class StepField : uint8_t
+{
+    Velocity = 0,
+    Micro,
+    Probability,
+    Ratchet,
+    Count
+};
+
 enum class Direction : uint8_t
 {
     Forward = 0,

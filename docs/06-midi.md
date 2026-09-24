@@ -43,14 +43,47 @@ wanting to play the thing from a keyboard without a laptop in the chain.
    TRS OUT  ◄─── 74HCT14 ◄──── UART TX ◄──── Daisy
 ```
 
-- **In**: H11L1 optoisolator. Schmitt-trigger output, so no extra conditioning. The isolation is
-  not optional — it's what stops ground loops between gear.
+- **In**: H11L1 optoisolator. Schmitt-trigger output, so no comparator or edge conditioning —
+  but the output is **open-collector and needs a pull-up**, which is easy to leave off a schematic
+  because "Schmitt output" reads like it is already driven. The isolation is not optional — it's
+  what stops ground loops between gear.
 - **Out**: two 74HCT14 gates in parallel for drive, 2×220 Ω series.
 - **Thru**: two more gates off the opto output. **Hardware thru is zero-latency** and keeps
   working even when the firmware is busy or crashed. The 74HCT14 has six gates; Out takes two,
   Thru takes two, so one chip covers both.
 - **Jacks**: 3.5 mm TRS **Type A** (the MIDI Association standard since 2018). Ship a TRS→DIN
   adapter with the unit if you care about older gear.
+
+### 2.1 Rails and levels
+
+This block spans two rails, and which part sits on which is the thing to get right before layout.
+
+| Part | Rail | Why |
+| --- | --- | --- |
+| H11L1 output stage (pin 5 V_CC) | **3V3** | Spec'd 3–16 V, so 3V3 is in range. Its open-collector output then pulls up to 3V3 and feeds `MIDI_RX` (PB7) directly |
+| Pull-up on the opto output | to **3V3** | 10 kΩ per the datasheet's typical application circuit |
+| 74HCT14 | **5 V** | HCT is a 4.5–5.5 V family, and MIDI Out/Thru is a 5 V current loop through 220 Ω — 5 V is what the standard wants anyway |
+
+**Running the opto at 3V3 rather than 5 V is the decision that matters**, and it is free. At 5 V its
+output would present 5 V to an MCU pin, and whether PB7 is 5 V-tolerant is a datasheet question
+this project would rather not have an answer riding on. At 3V3 the question does not arise.
+
+**A 3V3 opto output driving 5 V-powered HCT inputs is fine, and is the whole reason the part is
+HCT rather than HC.** HCT has TTL input thresholds — V_IH around 2 V — so 3V3 clears them
+comfortably. This is the same trick as the 74AHCT125 in front of the SK6812 chain
+([hardware §3.4](01-hardware.md#34-leds--sk6812-chain-on-spidma)), running in the same direction.
+
+The consequence worth stating plainly: **nothing in the MIDI block puts 5 V on an MCU pin.**
+
+Still to confirm against the real datasheet before the schematic is committed — none of it changes
+the topology above, but all of it sets component values:
+
+- **I_F(ON)**, the LED current that guarantees the output switches. H11L1/L2/L3 are graded by it,
+  and the input series resistor follows from whichever grade you buy. MIDI's loop is nominally
+  5 mA, so the grade is not a free choice.
+- **V_OL at the sink current** the 10 kΩ pull-up implies, to confirm a valid logic low at 3V3.
+- **Propagation delay.** Ample at 31.25 kBd on any reading, but worth a number rather than a
+  shrug, because hardware Thru latency is a claim this document makes in §2.
 
 Soft thru (route In→Out in firmware) is also supported and is what you want for merging; hardware
 thru is what you want for reliability. Both exist, and §3 decides which is active.

@@ -108,7 +108,7 @@ single part buys:
   works.
 - **Presence detection.** "Does anything ACK on channel N."
 - **Self-description.** A few-cent EEPROM (24AA02-class) per cartridge carrying its name, how many
-  of the six macros it actually uses and what they map to, and CV calibration constants. A new
+  of the macros it actually uses and what they map to, and CV calibration constants. A new
   cartridge type then needs no firmware change.
 
 Self-description matters more than it looks. [Hardware §2](01-hardware.md#2-panel-layout) is
@@ -263,7 +263,7 @@ pattern plays with whatever is plugged in rather than refusing to load.
 
 ### 4.5 Six knobs on an empty slot
 
-A cartridge track with nothing plugged in has six macro knobs pointing at nothing, and
+A cartridge track with nothing plugged in has eight macro knobs pointing at nothing, and
 [hardware §2](01-hardware.md#2-panel-layout) is explicit that a knob doing nothing is worse than
 one doing something mild. Since the panel ships with four cartridge tracks and the carrier is a
 later phase, this is the *normal* state of a new machine, not an edge case.

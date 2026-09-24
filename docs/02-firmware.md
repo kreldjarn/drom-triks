@@ -285,6 +285,104 @@ leaving comfortable room for sample streaming, a second FX send, or more voices.
 not CPU-constrained, and you should not spend time optimising it until measurement says
 otherwise.
 
+### Filters, FX and LFOs — what is shared and what is per voice
+
+Rough per-sample costs for the planned additions, against that ~10,000 cycle budget. Estimates, and
+[Phase 2](04-development-plan.md#phase-2--voice-engine-23-weeks) is explicit that they must be
+re-measured on the H750 rather than trusted from a host build:
+
+| | cycles |
+| --- | ---: |
+| Two serial `Svf` per digital voice (8 × 2) | 800 |
+| Saturator per voice, driving them | 80 |
+| Master reverb + stereo delay | 450 |
+| Master compressor | 120 |
+| Twelve LFOs, evaluated per block | <15 |
+
+That lands near 30 % with everything on. **CPU is not what constrains this design.**
+
+**One delay and one reverb, shared, with a per-voice send and pan.** Per-voice delay *lines* were
+considered and do not fit: one second of stereo float at 48 kHz is 384 kB per voice, 3 MB across
+eight, against 480 kB of SRAM under `BOOT_SRAM`. The only place that fits is SDRAM, which would tie
+the design to the Seed3 permanently and contradict
+[production §5](11-production.md#5-the-module-question). Sends plus pan give the same stereo spread
+for four bytes of state per voice, and it is what Elektron do.
+
+**What is actually implemented** (`src/engine/fx.h`): the delay is ours, because DaisySP has no
+stereo cross-feed delay and because the buffer has to be caller-provided. The reverb and compressor
+are DaisySP's `ReverbSc` and `Compressor`, which live in **DaisySP-LGPL** — a separate library under
+LGPL-2.1, where DaisySP proper is MIT. `MasterFx` is the seam, so replacing either is one file.
+
+Two consequences:
+
+- **Licensing bites on distribution, not development.** Prototypes carry no obligation. Shipping
+  units means the licence text, an acknowledgement, and — since this is a static link — an offer of
+  object files so a user can relink. It does **not** require opening our firmware; that is GPL.
+  Recorded as a ship-time item in [production §3](11-production.md#3-three-things-to-build-into-v1-firmware).
+- **`ReverbSc` is `float aux_[98936]`, 395 kB, held by value.** It cannot be a member of `Machine`
+  (§2's 21.5 kB rule), so it is injected by pointer, and on the Seed3 it has to live in SDRAM. That,
+  not the licence, is what would force writing our own: a board without SDRAM cannot host it, and
+  the replacement is a Freeverb-shaped plate of about 50 kB.
+
+The delay buffer is caller-provided for the same reason. Under `BOOT_SRAM` the staged app image
+occupies the 480 kB AXI SRAM, leaving only the 128 kB DTCM and a 32 kB `.sram1_bss` for statics —
+so on the Seed3 both buffers want SDRAM. Keeping them out of the engine means that is a board
+decision rather than an engine one.
+
+**Per-voice digital FX only reaches tracks 1–8.** `AnalogVoice::Process` returns zero — cartridge
+audio comes back through the ADC — so filters, saturation and compression on tracks 9–12 depend on
+the SAI2 per-cartridge digitising path, which is still
+[an open check](05-analog-expansion.md#62-digitising-the-cartridges--now-affordable).
+
+### LFOs
+
+One per track, config held in `Kit` like any other parameter, which makes LFO settings **p-lockable
+for free**. Four things about them are easy to get wrong:
+
+- **Phase is runtime state and must never live in `Patch`.** `Patch` is memcpy-saved, so a stored
+  phase would make every pattern load snap a free-running LFO to it — which is exactly what FREE
+  mode means it must not do. Config in `Kit`, phase in `Machine`, on the audio side.
+- **A trig-synced reset has to honour `trigger_delay`.** The reset is part of the trigger, so
+  block-quantising it puts ±0.67 ms of phase jitter on every trig-synced LFO — the same error
+  `VoiceSlot` exists to avoid. The *continuous* modulation needs no such precision and is evaluated
+  per block; only the reset is sample-accurate. FREE mode never resets, so it sidesteps this
+  entirely.
+- **The value chain gains a third layer**: `effective = (locked ? lock : base) + depth × lfo(t)`,
+  now evaluated continuously rather than only at trigger. The restore in `ApplyLocks` must land on
+  **base**, not base+LFO, or the modulation bakes itself into the knob value — the same bug class
+  as a lock leaking into later steps.
+- **DEST, WAVE and MODE are enums stored as normalised floats.** `Kit.params` is `float` and
+  `ParamLock.value` is a `uint16_t` over 0..1, which quantises cleanly for any enum under about 16
+  entries — but the rounding has to be deliberate. A destination that drifts to its neighbour
+  through float comparison would be a miserable bug to find.
+
+A p-locked SPEED change in FREE mode must alter the phase *increment* without touching the
+accumulator, or every locked step clicks.
+
+**What is implemented** (`src/engine/lfo.h`, wired in `VoiceSlot`):
+
+| | |
+| --- | --- |
+| Modes | FREE, TRIG, HOLD, ONE |
+| Waves | triangle, sine, square, saw, ramp, random (S&H) |
+| Rate | tempo-relative — SPEED is cycles per beat, swept exponentially, × a quantised power-of-two MULT. `Machine` pushes tempo only when it changes, since recalculating costs a `pow` per track |
+| Destination | any of the 32 parameters, plus off. A `static_assert` ties `Lfo::kDestSlots` to `ParamId::Count + 1` so adding a page cannot silently make a parameter unreachable |
+| Update | phase advances once per block; the **reset** happens on the trigger's exact sample |
+
+`Lfo` deliberately does not know what a `ParamId` is — the destination is an opaque index the slot
+interprets. That is what keeps it dependency-free and testable on its own.
+
+Three behaviours are worth knowing because they are silent when wrong, and each has a test:
+
+- **Modulation is re-derived from base-or-lock every block, never accumulated.** Accumulating walks
+  the stored value instead of modulating it, which reads as a patch that drifts rather than as a
+  broken LFO.
+- **Moving DEST restores the parameter it left.** Otherwise the old destination stays frozen
+  wherever the modulation last put it.
+- **The locked value is the modulation origin on a locked step**, so a p-lock and an LFO compose
+  rather than fight. `PreModValue` scans the step's lock list rather than shadowing all 32
+  parameters — it runs once per block, not per sample.
+
 ## 6. Sequencer data model
 
 ```cpp
@@ -297,16 +395,40 @@ struct Step {
     uint8_t   probability;  // 0–100 %
     uint8_t   ratchet;      // 1–8 retriggers
     uint8_t   lock_count;
-    ParamLock locks[4];
-};                                              // 22 bytes
+    ParamLock locks[8];
+};                                              // 38 bytes
 
 struct Track  { Step steps[64]; uint8_t length; uint8_t speed; uint8_t direction; };
 struct Pattern{ Track tracks[12]; uint16_t bpm_x10; uint8_t swing; uint8_t kit_id; };
 ```
 
-**11.0 kB per pattern** at 8 tracks (measured, not estimated — `ParamLock` aligns to 4 bytes, not
-3, which takes `Step` to 22); **16.6 kB** at 12. 128 patterns is **2.07 MB** against the ~7 MB of
-writable QSPI, so there is still no reason to pack the struct and pay for unaligned access.
+**28.6 kB per pattern** at 12 tracks — measured from `sizeof`, not estimated. `ParamLock` aligns to
+4 bytes rather than 3, which takes `Step` to 38 at eight lock slots. A whole `Patch` (pattern plus
+kit plus header) is **30.1 kB**, and 128 patterns is **4.00 MB** against the ~7 MB of writable QSPI,
+leaving 2.81 MB. There is still no reason to pack the struct and pay for unaligned access.
+
+### The format freeze
+
+Two numbers are baked into `sizeof(Patch)`, and through it into the QSPI slot stride and every
+pattern already in flash: **`kMaxLocks`** and **`ParamId::Count`**. Changing either invalidates
+every stored pattern — `SaveHeader` rejects them rather than reinterpreting, which is the correct
+behaviour and also means they are gone.
+
+So both were chosen once, deliberately, **before Phase 6 writes anything real to flash**:
+
+| | Value | Why not larger |
+| --- | ---: | --- |
+| `kMaxLocks` | **8** | 12 works but takes patterns to 5.5 MB and DTCM to ~87 kB; 16 overflows the chip and the `static_assert` in `storage_layout.h` catches it |
+| `ParamId::Count` | **32** | Four pages of eight is what the panel can reach without menu diving (§7) |
+
+Pages are nearly free and lock slots are not: a page of eight parameters costs 288 bytes on the
+`Kit`, while each extra lock slot costs 4 bytes × 64 steps × 12 tracks ≈ 3 kB of `Patch`. That is
+why most of the 32-entry parameter space is declared but reserved — the space is cheap, and
+declaring it now is what avoids a second format break later.
+
+**Anything that changes `sizeof(Patch)` belongs on the near side of that line.** After Phase 6 it
+costs you your own patterns; after units ship it costs a migrator, or a firmware update that eats
+someone else's work.
 
 The four extra tracks are the analog cartridge slots. They carry steps, locks and micro-timing
 like any other track whether or not a cartridge is plugged in — which is what lets the trigger
@@ -329,8 +451,13 @@ step*. It checks the neighbouring positions too — and must de-duplicate, since
 its probability) up to three times per tick.
 
 **Parameter locks** are the feature worth building the data model around. Hold a step key, turn
-a pot, and that pot's value is recorded for that step only. Four lock slots per step is plenty in
-practice and keeps `Step` at a cache-friendly 22 bytes.
+a knob, and that knob's value is recorded for that step only. Eight lock slots per step, because
+with four pages of eight parameters four slots is a rationing exercise rather than an expressive
+limit.
+
+`VoiceSlot::locked_mask_` carries one bit per parameter and **must be at least `ParamId::Count`
+bits wide**. As a `uint8_t` it silently stopped restoring anything above index 7 the moment the
+parameter space grew past one page — a `static_assert` now pins it.
 
 The mechanism lives in `VoiceSlot`, which owns the **base** value of every parameter — what the
 knob says — separately from what the voice currently holds:
@@ -351,19 +478,59 @@ until the next unlocked step, and then jumps back to where it used to be.
 
 Modes, with `SHIFT` as a held modifier rather than a latched state:
 
-| Mode | 16 step keys | Macro encoders |
+| | 16 step keys | 8 macro encoders |
 | --- | --- | --- |
-| **PLAY** (default) | toggle steps on selected track | macros for selected track |
-| **hold a step key** | — | **write a p-lock** on that step |
-| **SHIFT + step** | step detail: velocity, micro, probability, ratchet | edit that step's params |
-| **MUTE** | — (track keys mute/unmute) | macros |
-| **PATTERN** | select / chain patterns | — |
+| **PLAY** (default) | toggle steps on the selected track | the current page, for the selected track |
+| **hold a step** | — | **write a p-lock** on that step |
+| **SHIFT + hold a step** | — | **step detail** — velocity, micro, probability, ratchet |
+| **SHIFT** alone | — | **master FX**, in two banks of eight |
+| **MUTE** (held) | — (track keys mute/unmute) | unchanged |
+| **PATTERN** (held) | load that slot; **SHIFT + step** saves to it | unchanged |
 | **REC + play** | live record from track keys, quantise optional | live-record turns as locks |
+
+**MUTE and PATTERN are held, not latched**, for the same reason SHIFT is: a held modifier has no
+state to get stuck in, which matters more on something you play than saving a finger does.
+
+One rule covers the three macro layers rather than three: **SHIFT makes a knob global — unless you
+are already holding a step, in which case it makes it local to that step.**
+
+| Control | Does |
+| --- | --- |
+| Nav encoder 0 | tempo; the pattern bank in PATTERN mode |
+| Nav encoder 1 | page; the master-FX bank while SHIFT is held |
+| Macro encoder push | that parameter back to its default |
+| TAP | tap tempo, rolling average, restarted by a gap over 2 s |
+
+Both nav encoders **clamp rather than reject** at their limits. A detent is normally ±1, but the
+10 kHz scan coalesces a fast spin into a larger delta, and rejecting that would make a quick flick
+near either end do nothing — which reads as a dead encoder rather than as a limit.
+
+### The UI never touches flash
+
+A QSPI write stalls for milliseconds (§8), and the patch has to be snapshotted by the audio side
+before it can be written at all. So PATTERN mode does not save; it posts a `Ui::StorageRequest`
+that the main loop collects with `TakeStorageRequest()` and turns into a snapshot plus a
+`Storage` call. The UI stays pure logic and stays testable headless.
+
+### Four pages of eight
+
+Thirty-two parameters reach eight encoders, so one navigation encoder selects the page — INST,
+FLTR, FX, LFO — and the eight macros address that page for the selected track.
+`ParamAt(page, slot)` in `src/engine/params.h` is the whole mapping.
+
+Two consequences worth stating. A page change **ends every gesture in flight**, for the same reason
+a track change does: the encoders now point somewhere else, and a spin spanning the change would
+write the old page's accumulated value to the new page's parameter. And a **reserved** parameter
+emits no command and never claims the screen — the UI draws it as inactive, because a live-looking
+knob that does nothing is precisely what [hardware §2](01-hardware.md#2-panel-layout) forbids.
+
+Four pages is also the ceiling. The rule below — if a feature requires menu diving, it is
+mis-designed — is what stops this becoming six.
 
 ### Encoders delete the pickup problem and add an acceleration one
 
-Six knobs address twelve tracks, so a *pot's* physical position is wrong the instant you change
-track. That needed soft takeover — the parameter stays put until the knob sweeps through the
+Eight knobs address twelve tracks across four pages, so a *pot's* physical position is wrong the
+instant you change either. That needed soft takeover — the parameter stays put until the knob sweeps through the
 stored value — plus a screen affordance explaining why the knob appeared dead. All of it is gone:
 an endless encoder has no position to disagree with, so `Ui` carries no `caught_` flags, no raw
 positions and no pickup state, and a p-lock is immediate rather than something you sweep into.
@@ -441,17 +608,21 @@ image is staged at chip offset `0x40000` and can grow to the 480 kB SRAM limit, 
 ─────────────────────────────────  user data starts at the 1 MB mark
 0x100000  settings      (4 kB)      1 slot   × 4 kB
 0x101000  kits          (128 kB)    32 slots × 4 kB
-0x121000  patterns      (2.5 MB)    128 slots × 20 kB
-0x3A1000  songs         (64 kB)     16 slots × 4 kB
-0x3B1000  free          (~4.3 MB)   reserved for sample data
+0x121000  patterns      (4.0 MB)    128 slots × 32 kB
+0x521000  songs         (64 kB)     16 slots × 4 kB
+0x531000  free          (~2.8 MB)   reserved for sample data
 ```
 
 **Slots are 4 kB-aligned, and that is a correctness requirement rather than tidiness.**
 `QSPIHandle::Erase` aligns its *start* address **down** to a 4 kB sector
 (`lib/libDaisy/src/per/qspi.cpp`), so a slot starting mid-sector means saving slot N erases the
-tail of slot N−1. `sizeof(Patch)` is 17,260 B, which rounds to a **20,480 B stride** — five
-sectors, 3.2 kB of it padding. Paying that is much cheaper than the alternative, and 128 slots
-still only occupy 2.5 MB of a chip with ~4.3 MB left over.
+tail of slot N−1. `sizeof(Patch)` is 30,796 B, which rounds to a **32,768 B stride** — eight
+sectors, 1.9 kB of it padding. Paying that is much cheaper than the alternative, and 128 slots
+occupy 4.0 MB of a chip with ~2.8 MB left over.
+
+The sample reservation shrank from 4.3 MB to 2.8 MB to pay for it, which is affordable because
+[Phase 7](04-development-plan.md#phase-7--expansion) streams samples from **SD over SDMMC**, not
+from QSPI. The free region is a convenience, not the sample plan.
 
 `PersistentStorage::Init()` **defaults its offset to 0**, which would place settings directly on
 top of the app image — the first save would corrupt the firmware executing it. Always pass the
@@ -480,6 +651,44 @@ So:
   buffer**, one `Patch`-sized object owned by the storage module. It is already the shape the
   rest of the firmware uses, and the copy has to exist somewhere regardless; putting it in `.bss`
   deliberately is the difference between a known 17 kB and an invisible one.
+
+### What is implemented
+
+| | |
+| --- | --- |
+| `src/io/flash.h` | `IFlash` — the seam, mirroring `IVoice`/`IChannel`. Plus `RamFlash`, which models NOR semantics: erase sets **0xFF**, and a write can only **clear** bits |
+| `src/io/storage.h` | `Storage` — slot arithmetic, header stamping, validation. Owns the one staging buffer, so like `Machine` it must never be a local |
+| `src/io/settings.h` | `Settings` — serial number, MIDI routing, LED clamp, 512 bytes reserved for calibration, and the `operator!=` `PersistentStorage` requires |
+| `src/platform/qspi_flash.h` | The libDaisy-backed `IFlash`. The only file outside `main.cpp` that includes libDaisy |
+
+Modelling NOR's write-only-clears-bits rule in the fake is what makes the tests worth having: a
+slot that is under-erased reads back as the **AND** of the old and new saves, behind a perfectly
+valid header. A fake that just memcpy'd would pass.
+
+Three things were checked against `lib/libDaisy/src/per/qspi.cpp` rather than assumed:
+
+- **`Erase` takes an inclusive end address, not a length.** Passing a size clears one sector and
+  leaves the rest of the slot holding the previous save.
+- **It aligns the start down to 4 kB**, as §8 already said — confirmed at `qspi.cpp:443`.
+- **It cannot overrun the slot.** The loop only uses a 64 kB block erase when the address is
+  64 kB-aligned *and* at least 64 kB remains before `end_addr`, stepping in 4 kB sectors
+  otherwise. So `Erase(addr, addr + stride - 1)` clears exactly `[addr, addr + stride)` and never
+  catches a neighbour. Worth recording, because it is the first question anyone asks and it is not
+  obvious from the signature.
+
+Addresses are **chip offsets**. `Write` and `Erase` both mask with `0x0FFFFFFF` and `GetData` adds
+`0x90000000`, so offsets and absolute addresses behave identically — the layout uses offsets.
+
+### Saving needs a snapshot, not a memcpy
+
+The main loop must not copy the patch itself. The audio side is its only writer (§4), so a copy
+taken mid-edit can tear — and **a torn `Patch` passes every header check**, because the magic,
+version and size are all still correct. It surfaces later as one wrong step: precisely the
+"sounds like corruption" failure `SaveHeader` exists to prevent and structurally cannot catch.
+
+So `Machine::RequestSnapshot(Patch*)` queues a command, the audio side copies at a block boundary,
+and `SnapshotReady()` tells the main loop when it may write. The copy costs ~30 kB of memcpy inside
+one audio block — about 4 % of a 667 µs block, once, on an explicit save.
 
 ### Why not a ValueTree
 

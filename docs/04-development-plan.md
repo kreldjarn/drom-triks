@@ -45,7 +45,8 @@ PCB, so it must be settled here.
   ([expansion](05-analog-expansion.md)) additions rather than rewrites
 - Four voices from DaisySP (BD, SD, CH, OH) — mostly configuration
 - Four custom voices (LT, CP, RS, FM)
-- Map all six macro params consistently across every voice
+- Map the INST page consistently across every voice; the other three pages are mostly reserved
+  until the DSP behind them exists ([firmware §6](02-firmware.md#the-format-freeze))
 - **Develop them on the host first.** `make -C host run` renders the real engine to a WAV with no
   board involved — DaisySP has no hardware dependency. Tune against reference records in a DAW,
   iterate in seconds, and arrive at hardware with the voices already right

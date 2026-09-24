@@ -28,6 +28,14 @@ CPP_SOURCES = src/main.cpp
 LIBDAISY_DIR = lib/libDaisy
 DAISYSP_DIR  = lib/DaisySP
 
+# ReverbSc and Compressor live in DaisySP-LGPL, a separate library under
+# LGPL-2.1 (DaisySP proper is MIT). libDaisy's core Makefile knows how to add
+# its include path and link -ldaisysp-lgpl; it just has to be asked.
+#
+# This carries a distribution obligation, not a development one — see
+# docs/11-production.md §3 and the note atop src/engine/fx.h.
+USE_DAISYSP_LGPL = 1
+
 SYSTEM_FILES_DIR = $(LIBDAISY_DIR)/core
 include $(SYSTEM_FILES_DIR)/Makefile
 
@@ -38,11 +46,13 @@ include $(SYSTEM_FILES_DIR)/Makefile
 libs:
 	$(MAKE) -C $(LIBDAISY_DIR)
 	$(MAKE) -C $(DAISYSP_DIR)
+	$(MAKE) -C $(DAISYSP_DIR)/DaisySP-LGPL
 
 .PHONY: libs-clean
 libs-clean:
 	$(MAKE) -C $(LIBDAISY_DIR) clean
 	$(MAKE) -C $(DAISYSP_DIR) clean
+	$(MAKE) -C $(DAISYSP_DIR)/DaisySP-LGPL clean
 
 # OpenOCD's stock configs cover the ST-Link + STM32H7 pairing; libDaisy ships none.
 OOCD_FLAGS = -f interface/stlink.cfg -f target/stm32h7x.cfg

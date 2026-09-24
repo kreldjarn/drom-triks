@@ -31,7 +31,7 @@ void Check(bool ok, const char *what)
 
 void Pump(Machine &m, int blocks = 1)
 {
-    float buf[32];
+    float buf[64]; // 32 frames, interleaved stereo
     for(int i = 0; i < blocks; ++i)
         m.Process(buf, 32);
 }

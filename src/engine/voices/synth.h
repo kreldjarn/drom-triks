@@ -3,7 +3,7 @@
 #include "../voice.h"
 
 // The four voices DaisySP doesn't cover. Each is built from primitives, and
-// each maps the same six macros as the DaisySP-backed voices so muscle memory
+// each maps the same INST-page macros as the DaisySP-backed voices so muscle memory
 // transfers between tracks (docs/01-hardware.md §2).
 
 namespace drom {

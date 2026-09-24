@@ -19,8 +19,8 @@ move. Re-cost before ordering.
 
 | Qty | Part | Example P/N | Unit | Ext | Notes |
 | ---: | --- | --- | ---: | ---: | --- |
-| 8 | Rotary encoder w/ switch, 24 detent | Bourns PEC11R-4215F-S0024 | $2.50 | $20.00 | 6 macro + 2 nav. On the 10 kHz CD4021 chain, not GPIO — pick on feel in Phase 1 |
-| 8 | Encoder knob | — | $1.50 | $12.00 | |
+| 10 | Rotary encoder w/ switch, 24 ppr | Bourns PEC11R-4215F-S0024 (detent) / -4015F-S0024 (detentless) | $2.50 | $25.00 | **8 macro + 2 nav.** Detentless suits the macros, detented the nav pair — see [hardware §2](01-hardware.md#2-panel-layout). On the 10 kHz CD4021 chain, not GPIO — pick on feel in Phase 1 |
+| 10 | Encoder knob | — | $1.50 | $15.00 | |
 | 1 | 9 mm dual-gang pot, B10k | Alpha RD901F-40-20R1-B10K (2-gang) | $1.50 | $1.50 | **Master volume, analog output path only** — not wired to the MCU |
 | 1 | Knob, Davies 1900 style | — | $1.50 | $1.50 | Distinct from the encoder knobs; it is a different kind of control |
 | 34 | MX-compatible switch, clear housing | Gateron KS-9 clear | $0.40 | $13.60 | Clear top so the LED reaches the cap |
@@ -43,7 +43,7 @@ plus 2 × 1 kΩ current-set resistors. Adds $3.50, removes RGB, removes timing r
 
 | Qty | Part | Example P/N | Unit | Ext | Notes |
 | ---: | --- | --- | ---: | ---: | --- |
-| 8 | 8-bit shift register (PISO) | CD4021BE | $0.60 | $4.80 | Two chains: 5 for 34 keys, 3 for 8 encoders + push |
+| 9 | 8-bit shift register (PISO) | CD4021BE | $0.60 | $5.40 | Two chains: 5 for 34 keys, 4 for 10 encoders + push. Both clocked together, so the 4th chip does not change the 400 kHz shift clock |
 | 1 | OLED 2.42" 128×64 SPI | SSD1309 module | $12.00 | $12.00 | 0.96" SSD1306 is $4 and too small to read |
 
 ## Audio output
@@ -60,9 +60,9 @@ plus 2 × 1 kΩ current-set resistors. Adds $3.50, removes RGB, removes timing r
 | Qty | Part | Example P/N | Unit | Ext | Notes |
 | ---: | --- | --- | ---: | ---: | --- |
 | 3 | 3.5 mm TRS jack (MIDI Type A) | PJ-320D | $1.00 | $3.00 | In, Out **and Thru** |
-| 1 | Optoisolator | H11L1 | $1.00 | $1.00 | Schmitt output; no extra buffering needed on input |
+| 1 | Optoisolator | H11L1 | $1.00 | $1.00 | Schmitt output, so no comparator — but **open-collector**, so it needs the pull-up below. Run it on **3V3, not 5 V** ([midi §2.1](06-midi.md#21-rails-and-levels)) |
 | 1 | Hex inverter/buffer | 74HCT14 | $0.40 | $0.40 | 6 gates: 2 for Out, 2 for Thru |
-| — | 220 Ω / 10 Ω / 33 Ω resistors | — | — | $0.70 | |
+| — | 220 Ω / 10 Ω / 33 Ω / **10 kΩ** resistors | — | — | $0.70 | 10 kΩ is the opto-output pull-up — the H11L1 is open-collector ([midi §2.1](06-midi.md#21-rails-and-levels)) |
 
 ## Power and misc
 
@@ -108,16 +108,16 @@ set of LEDs. Detail in [07-test-equipment.md](07-test-equipment.md#for-pcb-bring
 | Section | Cost |
 | --- | ---: |
 | Core | $229.49 |
-| Controls | $69.00 |
+| Controls | $77.00 |
 | LEDs and drivers | $6.78 |
-| Digital glue | $16.80 |
+| Digital glue | $17.40 |
 | Audio output | $10.00 |
 | MIDI | $5.10 |
 | Power and misc | $134.70 |
 | Analog expansion reservations | $9.00 |
-| **Total (v1, first unit)** | **≈ $481** |
+| **Total (v1, first unit)** | **≈ $489** |
 | *less one-time tooling (ST-Link, passives assortment, 4 spare PCBs and plates)* | *−$205* |
-| **Marginal cost of a second unit** | **≈ $276** |
+| **Marginal cost of a second unit** | **≈ $285** |
 
 Budget **$600–700 all-in** for the first build. That covers a second PCB spin, which you will
 need, and the parts you'll destroy learning.

@@ -12,6 +12,7 @@
 #include <vector>
 
 #include "../src/io/storage_layout.h"
+#include "../src/io/storage.h"
 #include "../src/machine.h"
 #include "../src/ui/ui.h"
 
@@ -30,7 +31,7 @@ void Check(bool ok, const char *what)
 
 void Pump(Machine &m, int blocks = 1)
 {
-    float buf[32];
+    float buf[64]; // 32 frames, interleaved stereo
     for(int i = 0; i < blocks; ++i)
         m.Process(buf, 32);
 }
@@ -160,7 +161,7 @@ int main()
         m.Push(c);
 
         std::vector<float> audio;
-        float buf[32];
+        float buf[64]; // 32 frames, interleaved stereo
         for(int b = 0; b < 3000; ++b)
         {
             m.Process(buf, 32);
@@ -213,6 +214,47 @@ int main()
         Check(m.state().external_sync.load(), "reports external sync");
         Check(std::fabs(m.state().tempo.load() - 90.f) < 1.f,
               "follows the 90 BPM master through the machine");
+    }
+
+    std::printf("\nsnapshot for saving:\n");
+    {
+        // The main loop must never memcpy the patch itself — the audio side is
+        // its only writer, and a torn copy passes every header check.
+        static Machine m;
+        static Patch   dst;
+        m.Init(48000.f);
+
+        Command c;
+        c.type  = Command::Type::SetKitParam;
+        c.track = 2;
+        c.param = static_cast<uint8_t>(ParamId::Tune);
+        c.value = 0.77f;
+        m.Push(c);
+        Pump(m);
+
+        m.RequestSnapshot(&dst);
+        Check(!m.SnapshotReady(), "not ready before the audio side has run");
+        Pump(m);
+        Check(m.SnapshotReady(), "ready once the command has been drained");
+        Check(dst.kit.params[2][static_cast<int>(ParamId::Tune)] == 0.77f,
+              "and the copy carries the edit that preceded it");
+        Check(std::memcmp(&dst.pattern, &m.patch().pattern, sizeof(Pattern)) == 0,
+              "the whole pattern matches the live one");
+
+        // A snapshot taken into a Storage staging buffer is what actually gets
+        // written, so prove that path end to end.
+        static RamFlash<kQspiBytes> flash;
+        static Storage              storage;
+        storage.Init(&flash);
+        m.RequestSnapshot(&storage.staging());
+        Pump(m);
+        Check(m.SnapshotReady(), "a snapshot straight into the staging buffer");
+        Check(storage.SaveStaged(0) == Storage::Result::Ok, "saves from staging");
+
+        static Patch back;
+        Check(storage.LoadPatch(0, back) == Storage::Result::Ok, "and loads back");
+        Check(back.kit.params[2][static_cast<int>(ParamId::Tune)] == 0.77f,
+              "with the edit intact after a flash round trip");
     }
 
     std::printf("\nqueue overflow is survivable:\n");

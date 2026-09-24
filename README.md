@@ -28,7 +28,7 @@ Carrier in [docs/05](docs/05-analog-expansion.md), the cards themselves in
 | [docs/07-test-equipment.md](docs/07-test-equipment.md) | What to buy, when — and why the scope comes last |
 | [docs/09-schematic.md](docs/09-schematic.md) | Step-by-step for the KiCad schematic, and what blocks it |
 | [docs/10-cartridge.md](docs/10-cartridge.md) | Analog cartridge design, slot pinout, and the Game Boy form factor |
-| [docs/11-production.md](docs/11-production.md) | Going from one to a hundred: design for assembly, EMC posture, what not to do |
+| [docs/11-production.md](docs/11-production.md) | Going from one to a hundred: design for assembly, EMC posture, whether the Daisy module stays |
 
 ## Design targets
 

@@ -1,5 +1,6 @@
 #pragma once
 #include <cstdint>
+#include "lfo.h"
 
 // The voice layer deliberately depends on DaisySP only — never on libDaisy.
 // That is what lets this exact code build and run natively on a host machine
@@ -8,18 +9,97 @@
 
 namespace drom {
 
-/// The six macro parameters. Every voice implements all six, even where the
-/// mapping is a stretch: a knob that does nothing on some tracks is worse than
-/// one that does something mild. See docs/01-hardware.md §2.
+/// Eight macro encoders x four pages. Every voice implements every parameter
+/// on a page it uses, even where the mapping is a stretch: a knob that does
+/// nothing on some tracks is worse than one that does something mild. See
+/// docs/01-hardware.md §2.
+///
+/// The whole 32-entry space is declared now even though most of it is not
+/// wired to anything yet, and that is deliberate. `Kit` is
+/// `float params[kNumTracks][ParamId::Count]`, so Count is baked into
+/// `sizeof(Patch)` and therefore into the QSPI slot stride and every pattern
+/// in flash. Growing the enum later is a save-format break; declaring the
+/// reserved slots now costs 4 bytes per track per slot and breaks nothing.
+/// See docs/02-firmware.md §6.
 enum class ParamId : uint8_t
 {
+    // --- Page 1: INST -------------------------------------------------------
     Tune = 0,
     Decay,
     Tone,
     Snap,
     Drive,
     Level,
+    Pan,
+    InstRsv1,
+
+    // --- Page 2: FLTR -------------------------------------------------------
+    // Two filters in series with a saturator driving them.
+    SatDrive,
+    Filter1Cutoff,
+    Filter1Res,
+    Filter1Mode,
+    Filter2Cutoff,
+    Filter2Res,
+    Filter2Mode,
+    FltrRsv1,
+
+    // --- Page 3: FX ---------------------------------------------------------
+    // One shared delay and one shared reverb; a track's controls here are
+    // sends and placement, not per-voice effect instances. Per-voice delay
+    // lines would be ~384 kB each and do not fit — docs/02-firmware.md §5.
+    DelaySend,
+    ReverbSend,
+    FxRsv1,
+    FxRsv2,
+    FxRsv3,
+    FxRsv4,
+    FxRsv5,
+    FxRsv6,
+
+    // --- Page 4: LFO --------------------------------------------------------
+    // Config only. The LFO *phase* is runtime state and must never live in
+    // Patch: Patch is memcpy-saved, so a stored phase would make every load
+    // snap a free-running LFO to it. See docs/02-firmware.md §5.
+    LfoSpeed,
+    LfoMult,
+    LfoFade,
+    LfoDest,
+    LfoWave,
+    LfoMode,
+    LfoDepth,
+    LfoStartPhase,
+
     Count
+};
+
+inline constexpr int kParamsPerPage = 8;
+inline constexpr int kNumPages      = 4;
+
+static_assert(static_cast<int>(ParamId::Count) == kNumPages * kParamsPerPage,
+              "the ParamId space must be exactly the pages the panel can reach");
+
+/// Power-on value for each parameter, indexed by ParamId.
+///
+/// Lives here rather than in params.h because VoiceBase needs it and params.h
+/// includes this header, not the other way round. params.h's kParamInfo takes
+/// its defaults from this array so there is one source of truth.
+///
+/// Reserved slots default to 0.5f rather than 0.0f on purpose: an unimplemented
+/// parameter that later becomes a filter cutoff would otherwise power on fully
+/// closed, i.e. silent, and the cause would not be obvious.
+inline constexpr float kParamDefault[static_cast<int>(ParamId::Count)] = {
+    // INST: Tune Decay Tone  Snap  Drive Level Pan   rsv
+    0.5f, 0.5f, 0.5f, 0.5f, 0.0f, 0.8f, 0.5f, 0.5f,
+    // FLTR: Sat  F1cut F1res F1mod F2cut F2res F2mod rsv
+    //   Both cutoffs default wide open. A lowpass at cutoff 0 is silence, and
+    //   a track that powers on mute with no obvious cause is exactly the trap
+    //   the note above is about.
+    0.0f, 1.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.5f,
+    // FX:   Dly  Rev   rsv   rsv   rsv   rsv   rsv   rsv
+    0.0f, 0.0f, 0.5f, 0.5f, 0.5f, 0.5f, 0.5f, 0.5f,
+    // LFO:  Spd  Mult  Fade  Dest  Wave  Mode  Depth Phase
+    0.5f, 0.5f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f,
 };
 
 /// A per-step parameter override. Value is 0..65535 mapping to the same 0..1
@@ -33,7 +113,15 @@ struct ParamLock
     float as_float() const { return value / 65535.f; }
 };
 
-inline constexpr int kMaxLocks = 4;
+/// Locks per step. Eight because four pages of eight parameters makes four
+/// slots a rationing exercise rather than an expressive limit.
+///
+/// This is baked into sizeof(Step) -> sizeof(Patch) -> the QSPI slot stride,
+/// so changing it invalidates every pattern in flash (SaveHeader rejects them
+/// rather than reinterpreting, which is correct but means they are gone).
+/// Pick it while flash is empty. Budget at 8: Patch ~30 kB, 32 kB slots,
+/// 2.81 MB of QSPI still free, half the DTCM. See docs/02-firmware.md §6.
+inline constexpr int kMaxLocks = 8;
 
 /// The seam. Sample playback and analog voices implement this same interface,
 /// so they become additions rather than rewrites of the sequencer, mixer and
@@ -54,6 +142,88 @@ class IVoice
     virtual float Process() = 0;
 };
 
+/// The per-sample stereo bus, plus the two effect sends.
+///
+/// Sends are taken *after* pan, so a voice's placement carries into the delay —
+/// which is what "stereo spread per voice" means in practice. Plain floats, no
+/// DaisySP, so this header stays linkable without the DSP library.
+struct MixBus
+{
+    float l = 0.f, r = 0.f;
+    float delay_l = 0.f, delay_r = 0.f;
+    float reverb_l = 0.f, reverb_r = 0.f;
+
+    void Clear() { *this = MixBus{}; }
+};
+
+/// True for parameters owned by the channel strip rather than by the voice.
+///
+/// Pan, the sends, the saturator and the two filters are not sound generation,
+/// so they must not go through IVoice — that seam is what keeps sample playback
+/// and analog cartridges additions rather than rewrites. See
+/// docs/02-firmware.md §5.
+inline constexpr bool IsChannelParam(ParamId id)
+{
+    switch(id)
+    {
+        case ParamId::Pan:
+        case ParamId::SatDrive:
+        case ParamId::Filter1Cutoff:
+        case ParamId::Filter1Res:
+        case ParamId::Filter1Mode:
+        case ParamId::Filter2Cutoff:
+        case ParamId::Filter2Res:
+        case ParamId::Filter2Mode:
+        case ParamId::DelaySend:
+        case ParamId::ReverbSend: return true;
+        default: return false;
+    }
+}
+
+/// True for the eight LFO settings. They configure the modulator rather than
+/// being modulated, so they go to neither the voice nor the strip.
+static_assert(Lfo::kDestSlots == static_cast<int>(ParamId::Count) + 1,
+              "an LFO must be able to address every parameter, plus off");
+
+inline constexpr bool IsLfoParam(ParamId id)
+{
+    const int i = static_cast<int>(id);
+    return i >= static_cast<int>(ParamId::LfoSpeed)
+           && i <= static_cast<int>(ParamId::LfoStartPhase);
+}
+
+/// The second seam, mirroring IVoice: a track's channel strip. The concrete
+/// implementation needs DaisySP and lives in channel.h; this interface does
+/// not, which is what lets the sequencer and p-lock tests link without it.
+class IChannel
+{
+  public:
+    virtual ~IChannel() = default;
+    virtual void Init(float sample_rate) = 0;
+    virtual void SetParam(ParamId id, float value) = 0;
+    /// Adds this track's contribution to the bus.
+    virtual void Process(float in, MixBus &bus) = 0;
+};
+
+/// A strip that only pans nothing and sums to both sides.
+///
+/// Exists for the same reason EmptySlot does: VoiceSlot touches the channel
+/// every sample, and a real object costs less than a null check. Stateless, so
+/// one shared instance is safe.
+class DirectChannel : public IChannel
+{
+  public:
+    void Init(float) override {}
+    void SetParam(ParamId, float) override {}
+    void Process(float in, MixBus &bus) override { bus.l += in; bus.r += in; }
+};
+
+inline DirectChannel &NullChannel()
+{
+    static DirectChannel c;
+    return c;
+}
+
 /// Sample-accurate trigger scheduling.
 ///
 /// The sequencer computes which sample *within* the current audio block a step
@@ -63,10 +233,13 @@ class IVoice
 class VoiceSlot
 {
   public:
-    void Init(IVoice *voice, float sample_rate)
+    void Init(IVoice *voice, float sample_rate, IChannel *channel = nullptr)
     {
-        voice_ = voice;
+        voice_   = voice;
+        channel_ = channel ? channel : &NullChannel();
         voice_->Init(sample_rate);
+        channel_->Init(sample_rate);
+        lfo_.Init(sample_rate);
         delay_ = -1;
         for(int i = 0; i < static_cast<int>(ParamId::Count); ++i)
             base_[i] = 0.5f;
@@ -81,7 +254,7 @@ class VoiceSlot
         // knob move would be overwritten by the restore and appear to do
         // nothing until the next unlocked step.
         if((locked_mask_ & (1u << static_cast<int>(id))) == 0)
-            voice_->SetParam(id, value);
+            Dispatch(id, value);
     }
 
     float base(ParamId id) const { return base_[static_cast<int>(id)]; }
@@ -99,11 +272,19 @@ class VoiceSlot
         lock_count_ = lock_count;
     }
 
+    /// Dry mono, voice only. Used by the p-lock tests and the WAV renderer,
+    /// which both want the voice without a channel strip in the way.
     float Process()
     {
         if(delay_ == 0)
         {
             ApplyLocks();
+            // Order matters: locks first so the LFO modulates this step's
+            // locked value, then the reset, then push the modulated value so a
+            // trig-synced LFO is already at its start phase when the voice
+            // fires rather than a block later.
+            lfo_.Trigger();
+            ApplyLfo();
             voice_->Trigger(velocity_);
         }
         if(delay_ >= 0)
@@ -111,7 +292,28 @@ class VoiceSlot
         return voice_->Process();
     }
 
-    IVoice *voice() { return voice_; }
+    /// Voice, then channel strip, accumulated into the bus.
+    void Process(MixBus &bus) { channel_->Process(Process(), bus); }
+
+    /// Advances the LFO one block and pushes the modulated value.
+    ///
+    /// Per block rather than per sample, deliberately: continuous modulation
+    /// does not need sample accuracy, and pushing every parameter every sample
+    /// would mean a virtual call per voice per sample for no audible gain. The
+    /// *reset* is a different matter and happens in Process(), on the exact
+    /// sample the trigger lands. See docs/02-firmware.md §5.
+    void AdvanceLfo(uint32_t frames)
+    {
+        lfo_.Advance(frames);
+        ApplyLfo();
+    }
+
+    void SetTempo(float bpm) { lfo_.SetTempo(bpm); }
+
+    Lfo &lfo() { return lfo_; }
+
+    IVoice   *voice() { return voice_; }
+    IChannel *channel() { return channel_; }
 
   private:
     /// Restore whatever the previous step locked, then apply this step's locks.
@@ -126,7 +328,7 @@ class VoiceSlot
         {
             for(int i = 0; i < static_cast<int>(ParamId::Count); ++i)
                 if(locked_mask_ & (1u << i))
-                    voice_->SetParam(static_cast<ParamId>(i), base_[i]);
+                    Dispatch(static_cast<ParamId>(i), base_[i]);
             locked_mask_ = 0;
         }
 
@@ -135,18 +337,99 @@ class VoiceSlot
             const int id = locks_[i].param_id;
             if(id >= static_cast<int>(ParamId::Count))
                 continue;
-            voice_->SetParam(static_cast<ParamId>(id), locks_[i].as_float());
+            Dispatch(static_cast<ParamId>(id), locks_[i].as_float());
             locked_mask_ |= (1u << id);
         }
     }
 
+    /// Routes a parameter to whichever object owns it. Both the lock path and
+    /// the restore path go through here, so a channel parameter is p-lockable
+    /// on exactly the same terms as a voice parameter.
+    void Dispatch(ParamId id, float value)
+    {
+        if(IsLfoParam(id))
+            SetLfoParam(id, value);
+        else if(IsChannelParam(id))
+            channel_->SetParam(id, value);
+        else
+            voice_->SetParam(id, value);
+    }
+
+    void SetLfoParam(ParamId id, float v)
+    {
+        switch(id)
+        {
+            // Speed changes the phase *increment* and never the accumulator,
+            // so p-locking SPEED on a free-running LFO bends the rate instead
+            // of clicking.
+            case ParamId::LfoSpeed:      lfo_.SetSpeed(v); break;
+            case ParamId::LfoMult:       lfo_.SetMult(v); break;
+            case ParamId::LfoFade:       lfo_.SetFade(v); break;
+            case ParamId::LfoDest:       lfo_.SetDest(v); break;
+            case ParamId::LfoWave:       lfo_.SetWave(v); break;
+            case ParamId::LfoMode:       lfo_.SetMode(v); break;
+            case ParamId::LfoDepth:      lfo_.SetDepth(v); break;
+            case ParamId::LfoStartPhase: lfo_.SetStartPhase(v); break;
+            default: break;
+        }
+    }
+
+    /// What a parameter would read without modulation: its base, unless this
+    /// step locks it. Scanning the lock list beats shadowing every parameter,
+    /// and it runs once per block rather than per sample.
+    float PreModValue(int d) const
+    {
+        if(locked_mask_ & (1u << d))
+            for(uint8_t i = 0; i < lock_count_ && locks_; ++i)
+                if(locks_[i].param_id == d)
+                    return locks_[i].as_float();
+        return base_[d];
+    }
+
+    /// Writes base-or-lock plus modulation to the destination.
+    ///
+    /// The modulation is re-derived from PreModValue every time rather than
+    /// accumulated, which is what stops an LFO walking the stored value —
+    /// the same failure mode as a p-lock leaking into later steps.
+    void ApplyLfo()
+    {
+        const int count = static_cast<int>(ParamId::Count);
+        const int d     = lfo_.active() ? static_cast<int>(lfo_.dest()) - 1 : -1;
+
+        // A destination that moves must not leave the old one stuck at
+        // whatever the modulation last wrote.
+        if(d != last_lfo_dest_)
+        {
+            if(last_lfo_dest_ >= 0 && last_lfo_dest_ < count)
+                Dispatch(static_cast<ParamId>(last_lfo_dest_),
+                         PreModValue(last_lfo_dest_));
+            last_lfo_dest_ = d;
+        }
+        if(d < 0 || d >= count)
+            return;
+
+        float v = PreModValue(d) + lfo_.value();
+        if(v < 0.f) v = 0.f;
+        if(v > 1.f) v = 1.f;
+        Dispatch(static_cast<ParamId>(d), v);
+    }
+
     IVoice          *voice_    = nullptr;
+    IChannel        *channel_  = nullptr;
     int32_t          delay_    = -1;
     float            velocity_ = 0.f;
     const ParamLock *locks_      = nullptr;
     uint8_t          lock_count_ = 0;
-    uint8_t          locked_mask_ = 0;
+    /// One bit per ParamId. Must be at least Count bits wide — as a uint8_t
+    /// this silently stopped restoring anything above index 7 the moment the
+    /// parameter space grew past a single page.
+    uint32_t         locked_mask_ = 0;
+    Lfo              lfo_;
+    int              last_lfo_dest_ = -1;
     float            base_[static_cast<int>(ParamId::Count)] = {};
+
+    static_assert(static_cast<int>(ParamId::Count) <= 32,
+                  "locked_mask_ has one bit per parameter");
 };
 
 /// Shared drive + level tail, since DaisySP's drum models have neither and all
@@ -163,6 +446,12 @@ class VoiceBase : public IVoice
     }
 
   protected:
+    VoiceBase()
+    {
+        for(int i = 0; i < static_cast<int>(ParamId::Count); ++i)
+            params_[i] = kParamDefault[i];
+    }
+
     virtual void OnParam(ParamId, float) {}
 
     /// Voices that use AdEnv must gate on this.
@@ -186,7 +475,7 @@ class VoiceBase : public IVoice
         return y * param(ParamId::Level);
     }
 
-    float params_[static_cast<int>(ParamId::Count)] = {0.5f, 0.5f, 0.5f, 0.5f, 0.f, 0.8f};
+    float params_[static_cast<int>(ParamId::Count)] = {};
 };
 
 /// An analog cartridge slot with nothing plugged into it.

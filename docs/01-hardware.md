@@ -44,8 +44,8 @@ Two Seed3 caveats worth knowing up front:
   │   │  SSD1309 2.42"       │      value/tempo   nav/page             │
   │   └──────────────────────┘                                         │
   │                                                                    │
-  │    (E1)   (E2)   (E3)   (E4)   (E5)   (E6)          (VOL)          │
-  │    TUNE   DECAY  TONE   SNAP   DRIVE  LEVEL       master, analog    │
+  │   (E1) (E2) (E3) (E4) (E5) (E6) (E7) (E8)          (VOL)           │
+  │   ─ eight macros, meaning set by the current page ─  master, analog │
   │                                                                    │
   │   [BD] [SD] [CH] [OH] [LT] [CP] [RS] [FM]     ← 8 digital tracks   │
   │   [C1] [C2] [C3] [C4]                         ← 4 cartridge tracks │
@@ -57,7 +57,7 @@ Two Seed3 caveats worth knowing up front:
   └────────────────────────────────────────────────────────────────────┘
 ```
 
-**34 keys total** (16 step + 12 track + 6 transport), all RGB-backlit, **8 encoders** (6 macro +
+**34 keys total** (16 step + 12 track + 6 transport), all RGB-backlit, **10 encoders** (8 macro +
 2 navigation, all with push switches), and **one analog master volume pot**.
 
 Tracks 9–12 are the analog cartridge slots from [doc 05](05-analog-expansion.md) — additive to the
@@ -65,10 +65,34 @@ eight digital voices, not substitutes. Their keys are populated in v1 even befor
 the sequencer tracks work regardless, driving the 74HC595 trigger outputs into Eurorack or an
 external drum module, and an unpopulated slot is simply a silent track.
 
-The six macro encoders are *macros*, not per-voice controls. They always address the currently
-selected track, and the labels are fixed across all eight voices:
+### The macros, and the pages they address
 
-| Pot | BD | SD | CH / OH | CP | RS | FM |
+The eight macro encoders are *macros*, not per-voice controls. They always address the currently
+selected track, and one of the two navigation encoders selects which **page** of eight they reach.
+Four pages, 32 parameters:
+
+| Page | What the eight knobs are |
+| --- | --- |
+| **INST** | TUNE · DECAY · TONE · SNAP · DRIVE · LEVEL · PAN · *reserved* |
+| **FLTR** | SAT · CUT 1 · RES 1 · MODE 1 · CUT 2 · RES 2 · MODE 2 · *reserved* |
+| **FX** | DLY SND · REV SND · *six reserved* |
+| **LFO** | SPEED · MULT · FADE · DEST · WAVE · MODE · DEPTH · PHASE |
+
+Most of FX, and the two reserved slots, are declared but not wired to anything yet. That is
+deliberate: the parameter count is baked into `sizeof(Patch)` and therefore into every pattern in
+flash, so the space was frozen at 32 before Phase 6 rather than grown later — see
+[firmware §6](02-firmware.md#6-sequencer-data-model). The UI draws a reserved slot as inactive
+rather than as a live knob that does nothing.
+
+**Eight rather than six is what makes the pages work.** At six the LFO page does not fit — Elektron
+run that page at eight and so must we — and the filter page wants seven. Electrically it costs one
+more CD4021 and no pins ([§3.2](#32-keys-and-encoders--two-cd4021-chains)); mechanically it costs
+nothing, because the macro row grows from 175 mm to ~225 mm on a board that is 321 mm wide for
+other reasons ([§5](#5-mechanical)).
+
+The INST page is where the fixed mapping is load-bearing:
+
+| Knob | BD | SD | CH / OH | CP | RS | FM |
 | --- | --- | --- | --- | --- | --- | --- |
 | TUNE | base freq | base freq | base freq | body freq | pitch | carrier |
 | DECAY | decay | decay | decay | tail length | decay | decay |
@@ -76,12 +100,17 @@ selected track, and the labels are fixed across all eight voices:
 | SNAP | punch | snappy | metallicity | spread | mix | index |
 | DRIVE | drive | drive | drive | drive | drive | drive |
 | LEVEL | level | level | level | level | level | level |
+| PAN | placement in the shared stereo field — identical on every voice | | | | | |
 
 This is the single most important UX decision in the build. 12 tracks × 6 params = 72 knobs if
-done literally; the macro mapping gets you the same control surface for 6 knobs and makes muscle
-memory transfer between voices. Every voice must implement all six, even where the mapping is
-a stretch — a knob that does nothing on some tracks is worse than a knob that does something
-mild.
+done literally; the macro mapping gets you the same control surface for 8 knobs and makes muscle
+memory transfer between voices. Every voice must implement every parameter on a page it uses, even
+where the mapping is a stretch — a knob that does nothing on some tracks is worse than a knob that
+does something mild.
+
+**That rule is about a knob being dead on *some* tracks.** A slot left unused consistently across a
+whole page is a different thing and is honest, which is why the eighth INST slot stays reserved
+rather than being filled with an invented parameter.
 
 Cartridges can't be tabulated here because the point of them is that they change. Each one carries
 its own mapping in an on-board EEPROM and the UI reads it at boot
@@ -128,13 +157,18 @@ Two chains sharing clock and latch, with a data line each:
 
 | Chain | Inputs | Chips | Sampled |
 | --- | ---: | ---: | --- |
-| Encoders | 16 quadrature + 8 push | 3 × CD4021 | 10 kHz |
+| Encoders | 20 quadrature + 10 push | 4 × CD4021 | 10 kHz |
 | Keys | 34 | 5 × CD4021 | read at 10 kHz, decimated to 1 kHz |
 
 `SR_CLK` and `SR_LATCH` drive both; `ENC_DATA` and `KEY_DATA` come back separately. 40 bits at
 10 kHz is a 400 kHz shift clock, comfortable for a CD4021 at 3V3. **Lengthening a chain costs no
-pins** — that is the whole point of a shift register, and it is why 58 inputs cost one pin more
+pins** — that is the whole point of a shift register, and it is why 64 inputs cost one pin more
 than 30 did.
+
+Going from six macros to eight added a fourth chip to the encoder chain and changed nothing else.
+The chains are clocked together and the **key** chain is the longer one at 40 bits, so taking the
+encoder chain from 24 to 32 bits leaves the shift clock exactly where it was. The Phase 1
+lost-counts risk is unchanged.
 
 Use the CD4021 specifically, not the more common 74HC165 — libDaisy ships a
 `ShiftRegister4021` driver in `src/dev/sr_4021.h` that is templated on chain length, so this is
@@ -236,7 +270,7 @@ pins instead, taken from the lanes the 1-bit SD card freed.
 | D8 | PG11 | — | SPI1 SCK: driven by the peripheral, **do not route** (test point only) |
 | D9 | PB4 | `KEY_DATA` | 5 × CD4021, 34 keys |
 | D10 | PB5 | `LED_DATA` | SPI1 MOSI → 74AHCT125 → SK6812 |
-| D11 | PB8 | `ENC_DATA` | 3 × CD4021, 8 encoders + push |
+| D11 | PB8 | `ENC_DATA` | 4 × CD4021, 10 encoders + push |
 | **D12** | PB9 | — | **spare** |
 | D13 | PB6 | `MIDI_TX` | USART1 |
 | D14 | PB7 | `MIDI_RX` | USART1 |
@@ -332,7 +366,7 @@ What sets the width is *not* the step keys, which is the intuitive answer and th
 | --- | ---: |
 | 16 step keys @ 19.05 mm | 304.8 mm |
 | **12 track keys** | **228.6 mm** ← the floor |
-| 6 macros + volume | 175.0 mm |
+| 8 macros + volume | ~225.0 mm |
 | OLED + 2 nav encoders | 138.0 mm |
 | 6 transport keys | 114.3 mm |
 

@@ -17,8 +17,17 @@ constraints shaped it, and two overturned earlier assumptions:
   MOSI, and the display is drawn from the main loop while triggers fire from the audio callback.
   It has three dedicated pins.
 
-26 pins assigned, 2 spare (both ADC-capable), 2 reserved for USB MIDI host, 1 consumed by a
-peripheral but left unrouted.
+**18 assigned, 7 spare** (six of them ADC-capable), **5 reserved** — three for SAI2, two for USB
+MIDI host — and **1 consumed by a peripheral but left unrouted**. 31 in all.
+
+The two CV/expression pins (D15, D16) count as spare here because their jacks are footprint-only in
+v1; they are assigned the moment anything is populated.
+
+> This line previously read "26 assigned, 2 spare, 2 reserved for USB MIDI host". That is the
+> **pot-based** budget, from before the six macros moved onto encoders and onto the shift-register
+> chain — the change that freed nine pins and made the three SAI2 reservations possible
+> ([hardware §3.6](01-hardware.md#36-pin-map)). Count from that table rather than restating it
+> here; this file should not carry a second copy of the number.
 
 ## 1. Tooling
 
@@ -45,7 +54,7 @@ bring the board up:
 | --- | --- |
 | `power` | USB-C in, 5 V rail, bulk/decoupling, DC jack footprint, star ground point |
 | `daisy` | The Seed3 + its headers, JTAG header, boot/reset |
-| `controls` | 8 encoders → 3 × CD4021, master volume pot in the audio path, CV jack footprints |
+| `controls` | 10 encoders → 4 × CD4021, master volume pot in the audio path, CV jack footprints |
 | `keys` | 5 × CD4021 chain, 34 switches + hot-swap sockets |
 | `leds` | 74AHCT125 level shifter, SK6812 chain, per-LED decoupling |
 | `display` | SSD1309 OLED header |
