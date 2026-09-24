@@ -3,6 +3,7 @@
 #include <cstring>
 #include "engine/channel.h"
 #include "engine/fx.h"
+#include "engine/machines.h"
 #include "engine/voices/drums.h"
 #include "engine/voices/synth.h"
 #include "io/patch.h"
@@ -23,6 +24,7 @@ struct Command
     {
         None = 0,
         SetKitParam,   ///< track, param, value
+        SetMachine,    ///< track, param = MachineId
         SetFxParam,    ///< param = FxId, value — master delay/reverb/compressor
         Snapshot,      ///< copy the patch to snapshot_dst_ for the main loop
         LoadPatch,     ///< adopt the patch at load_src_, from the main loop
@@ -73,12 +75,11 @@ class Machine
         sample_rate_ = sample_rate;
         fx_.Init(sample_rate, delay_buf, delay_frames, reverb);
 
-        voices_[0] = &bd_; voices_[1] = &sd_; voices_[2] = &ch_; voices_[3] = &oh_;
-        voices_[4] = &lt_; voices_[5] = &cp_; voices_[6] = &rs_; voices_[7] = &fm_;
-        for(int i = 0; i < kNumCartridgeSlots; ++i)
-            voices_[kNumDigitalVoices + i] = &cart_[i];
         for(int i = 0; i < kNumTracks; ++i)
-            slots_[i].Init(voices_[i], sample_rate, &strips_[i]);
+        {
+            machines_[i].Init(sample_rate, kDefaultMachine[i]);
+            slots_[i].Init(machines_[i].voice(), sample_rate, &strips_[i]);
+        }
 
         InitPatch(patch_);
         for(auto &t : patch_.pattern.tracks)
@@ -156,6 +157,13 @@ class Machine
 
     ClockPll  &pll() { return pll_; }
     Sequencer &sequencer() { return seq_; }
+
+    MachineId machine(int track) const
+    {
+        return (track >= 0 && track < kNumTracks)
+                   ? static_cast<MachineId>(patch_.kit.machine[track])
+                   : MachineId::Silent;
+    }
 
     // ---- audio side --------------------------------------------------------
 
@@ -244,6 +252,17 @@ class Machine
                 {
                     patch_.kit.fx[c.param] = c.value;
                     fx_.SetParam(static_cast<FxId>(c.param), c.value);
+                }
+                break;
+
+            case Command::Type::SetMachine:
+                // Range-checked rather than trusted: this also runs from
+                // ApplyKit with a byte that came out of flash.
+                if(c.param < static_cast<uint8_t>(MachineId::Count))
+                {
+                    patch_.kit.machine[t] = c.param;
+                    if(machines_[t].Set(static_cast<MachineId>(c.param)))
+                        slots_[t].Rebind(machines_[t].voice());
                 }
                 break;
 
@@ -342,6 +361,16 @@ class Machine
 
     void ApplyKit()
     {
+        // Machines first, then parameters: a rebind pushes whatever the slot
+        // last held, and the loop below is what makes the new voice agree with
+        // the kit being applied.
+        for(int t = 0; t < kNumTracks; ++t)
+        {
+            const uint8_t m = patch_.kit.machine[t];
+            if(m < static_cast<uint8_t>(MachineId::Count)
+               && machines_[t].Set(static_cast<MachineId>(m)))
+                slots_[t].Rebind(machines_[t].voice());
+        }
         for(int t = 0; t < kNumTracks; ++t)
             for(int p = 0; p < static_cast<int>(ParamId::Count); ++p)
                 slots_[t].SetBase(static_cast<ParamId>(p), patch_.kit.params[t][p]);
@@ -361,15 +390,11 @@ class Machine
                            std::memory_order_relaxed);
     }
 
-    BassDrum bd_; SnareDrum sd_; ClosedHat ch_; OpenHat oh_;
-    Tom lt_; Clap cp_; RimShot rs_; FmVoice fm_;
-
-    /// Tracks 9–12. An AnalogVoice replaces one of these per occupied slot once
-    /// a carrier exists; until then the tracks sequence and p-lock normally and
-    /// simply sound nothing.
-    EmptySlot cart_[kNumCartridgeSlots];
-
-    IVoice      *voices_[kNumTracks] = {};
+    /// One swappable machine per track, constructed in place. Tracks 9-12
+    /// default to Silent: an AnalogVoice takes over per occupied cartridge slot
+    /// once a carrier exists, and until then they sequence and p-lock normally
+    /// and simply sound nothing.
+    MachineSlot  machines_[kNumTracks];
     VoiceSlot    slots_[kNumTracks];
     ChannelStrip strips_[kNumTracks];
     Patch     patch_;

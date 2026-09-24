@@ -102,6 +102,12 @@ The INST page is where the fixed mapping is load-bearing:
 | LEVEL | level | level | level | level | level | level |
 | PAN | placement in the shared stereo field — identical on every voice | | | | | |
 
+**The legend is a default, not a constraint.** Any machine can go on any track
+([firmware §5](02-firmware.md#machines-are-selectable-per-track)), the way a Machinedrum works —
+so a track legended BD can be running a clap. That is worth deciding on purpose rather than
+discovering, because §5 puts these legends in cut metal. The alternative is to legend the tracks
+1–12 and let the screen say what each one is.
+
 This is the single most important UX decision in the build. 12 tracks × 6 params = 72 knobs if
 done literally; the macro mapping gets you the same control surface for 8 knobs and makes muscle
 memory transfer between voices. Every voice must implement every parameter on a page it uses, even

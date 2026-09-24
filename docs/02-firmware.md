@@ -159,6 +159,32 @@ eight voices are mostly configuration:
 | 7 | RS | custom: two detuned squares through a BPF, 808-rimshot style |
 | 8 | FM | custom: 2-op FM with operator feedback, EFM-style — metallic perc, cowbell, blips, sub |
 
+### Machines are selectable per track
+
+A track's sound is not fixed to its legend. `MachineSlot` holds per-track storage sized for the
+largest machine, and switching **constructs in place** — placement-new, never an allocation, since
+the audio side owns voice state. A `static_assert` in `Make<>` is what stops a new machine
+outgrowing the slot silently.
+
+| Machine | Character |
+| --- | --- |
+| `BD 808` | the model above, tuned for punch |
+| `BD BOOM` | deep sine, long tail, slow sweep — **263 ms against 141 ms at DECAY 0.5, with a third the zero crossings** |
+| `SD 909` | balanced noise and body |
+| `SD PUNCH` | transient-forward — **68 ms against 443 ms**, and its noise dies rather than hissing on |
+| `CH` `OH` `TOM` `CLAP` `RIM` `FM` | as the table above |
+| `SILENT` | an unpopulated cartridge slot, or a deliberately dead track |
+
+The selection lives in the `Kit` as a `uint8_t` per track, so it survives a save and is
+**range-checked on load** — a byte out of flash is not a guarantee. Changing machine rebinds the
+`VoiceSlot`, which clears the lock mask (the previous step's locks were applied to a voice that no
+longer exists) and pushes every stored parameter into the new one, because a freshly constructed
+machine starts at its own defaults and knows nothing of what the knobs say.
+
+**The panel legend becomes a default rather than a truth.** BD/SD/CH/OH… is silkscreened, and
+[hardware §5](01-hardware.md#5-mechanical) puts those legends in cut metal. Worth deciding
+deliberately before the panel is made — see [hardware §2](01-hardware.md#2-panel-layout).
+
 All eight implement one interface, and that interface is the seam that makes sample support a
 later addition rather than a rewrite:
 
@@ -191,8 +217,10 @@ sample as the gate, so a bus too slow for the audio callback pushes every parame
 behind its own trigger. [Doc 05 §4.2](05-analog-expansion.md#42-why-the-bus-choice-decides-whether-p-locks-work)
 has the full argument.
 
-All twelve voices are statically allocated. `Machine` grows to 21.5 kB, which changes nothing
-about the rule that it is never a stack local.
+All twelve machines are statically allocated. `Machine` is now **46.2 kB** — the patch at 30.1 kB
+plus twelve 784-byte machine slots, the voice slots, the channel strips and the queue. With
+`Storage`'s staging buffer that is roughly 76 kB of the 128 kB DTCM, so the rule that neither is
+ever a stack local matters more than it did at 21.5 kB, not less.
 
 ### Percussive FM
 

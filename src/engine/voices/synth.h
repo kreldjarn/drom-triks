@@ -481,4 +481,198 @@ class FmVoice : public VoiceBase
     bool               gritty_   = false;
 };
 
+/// Boom kick. A deep sine with a long pitch sweep and a soft-clipped tail —
+/// the opposite end of the range from the 808 model, which is tuned for punch.
+///
+/// The character comes from the *ratio* of sweep to decay rather than from
+/// either alone: a long amplitude tail under a pitch drop that finishes early
+/// reads as "boom", while the same drop under a short tail is just a click.
+/// SNAP sets the sweep depth, so it moves between a sub thud and a laser.
+class BassDrumBoom : public VoiceBase
+{
+  public:
+    void Init(float sr) override
+    {
+        sr_ = sr;
+        amp_.Init(sr);
+        amp_.SetTime(daisysp::ADENV_SEG_ATTACK, 0.001f);
+        amp_.SetCurve(kPercCurve);
+        amp_.SetMax(1.f);
+        amp_.SetMin(0.f);
+        phase_ = 0.f;
+        Retime();
+    }
+
+    void Trigger(float velocity) override
+    {
+        vel_    = velocity;
+        phase_  = 0.f;
+        sweep_  = 1.f;
+        active_ = true;
+        amp_.Trigger();
+    }
+
+    float Process() override
+    {
+        if(!active_)
+            return 0.f;
+        const float env = amp_.Process();
+        if(!amp_.IsRunning() && env <= 0.f)
+        {
+            active_ = false;
+            return 0.f;
+        }
+
+        // The pitch envelope is its own exponential decay, deliberately much
+        // faster than the amplitude one.
+        sweep_ *= sweep_coeff_;
+        const float f = base_hz_ * (1.f + sweep_ * depth_);
+        phase_ += f / sr_;
+        if(phase_ >= 1.f)
+            phase_ -= 1.f;
+
+        // Soft clip before the shared drive stage: a sine this loud with no
+        // harmonics disappears on small speakers, and a little fold puts a
+        // second harmonic back without making it buzz.
+        const float s    = FastSin(phase_);
+        const float warm = s * (1.f + tone_ * 1.5f);
+        const float sat  = warm / (1.f + (warm < 0.f ? -warm : warm) * tone_);
+        return Shape(sat * env * vel_);
+    }
+
+  protected:
+    void OnParam(ParamId id, float v) override
+    {
+        switch(id)
+        {
+            case ParamId::Tune:  base_hz_ = 25.f + v * 45.f; break;
+            case ParamId::Decay: Retime(); break;
+            case ParamId::Tone:  tone_ = v; break;
+            // Up to four octaves of drop. Past that it stops reading as a kick.
+            case ParamId::Snap:  depth_ = v * 15.f; break;
+            default: break;
+        }
+    }
+
+  private:
+    void Retime()
+    {
+        // Longer than the other kick on purpose: this machine exists for tails.
+        const float d = DecayTime(param(ParamId::Decay)) * 1.8f;
+        amp_.SetTime(daisysp::ADENV_SEG_DECAY, d);
+        // Sweep finishes in roughly the first eighth of the tail.
+        const float sweep_s = d * 0.125f;
+        sweep_coeff_        = expf(-1.f / (sweep_s * sr_));
+    }
+
+    daisysp::AdEnv amp_;
+    float sr_ = 48000.f, phase_ = 0.f, base_hz_ = 45.f;
+    float sweep_ = 0.f, sweep_coeff_ = 0.999f, depth_ = 6.f;
+    float tone_ = 0.5f, vel_ = 1.f;
+};
+
+/// Punch snare. Transient-forward: a very short, bright noise crack over a body
+/// tone that drops fast, rather than the balanced noise/body of the 909 model.
+///
+/// Two noise envelopes rather than one — a few-millisecond crack and a longer
+/// rattle — because a single envelope can be sharp or sustained but not both,
+/// and a snare needs the attack to outrun its own tail.
+class SnareDrumPunch : public VoiceBase
+{
+  public:
+    void Init(float sr) override
+    {
+        sr_ = sr;
+        noise_.Init();
+        crack_.Init(sr);
+        crack_.SetTime(daisysp::ADENV_SEG_ATTACK, 0.0005f);
+        crack_.SetTime(daisysp::ADENV_SEG_DECAY, 0.012f);
+        crack_.SetCurve(kPercCurve);
+        crack_.SetMax(1.f);
+        crack_.SetMin(0.f);
+        rattle_.Init(sr);
+        rattle_.SetTime(daisysp::ADENV_SEG_ATTACK, 0.001f);
+        rattle_.SetCurve(kPercCurve);
+        rattle_.SetMax(1.f);
+        rattle_.SetMin(0.f);
+        body_.Init(sr);
+        body_.SetTime(daisysp::ADENV_SEG_ATTACK, 0.0005f);
+        body_.SetCurve(kPercCurve);
+        body_.SetMax(1.f);
+        body_.SetMin(0.f);
+        hp_.Init(sr);
+        hp_.SetRes(0.15f);
+        Retime();
+    }
+
+    void Trigger(float velocity) override
+    {
+        vel_     = velocity;
+        phase_   = 0.f;
+        drop_    = 1.f;
+        active_  = true;
+        crack_.Trigger();
+        rattle_.Trigger();
+        body_.Trigger();
+    }
+
+    float Process() override
+    {
+        if(!active_)
+            return 0.f;
+        const float ce = crack_.Process();
+        const float re = rattle_.Process();
+        const float be = body_.Process();
+        if(!crack_.IsRunning() && !rattle_.IsRunning() && !body_.IsRunning()
+           && ce <= 0.f && re <= 0.f && be <= 0.f)
+        {
+            active_ = false;
+            return 0.f;
+        }
+
+        const float n = noise_.Process();
+        hp_.Process(n);
+        const float noise = hp_.High() * (ce * 1.4f + re * 0.6f);
+
+        // A body pitch that falls fast is most of what "punch" means here.
+        drop_ *= drop_coeff_;
+        phase_ += (base_hz_ * (1.f + drop_ * 1.6f)) / sr_;
+        if(phase_ >= 1.f)
+            phase_ -= 1.f;
+        const float body = FastSin(phase_) * be;
+
+        return Shape((noise * snap_ + body * (1.f - snap_ * 0.6f)) * vel_);
+    }
+
+  protected:
+    void OnParam(ParamId id, float v) override
+    {
+        switch(id)
+        {
+            case ParamId::Tune:  base_hz_ = 140.f + v * 260.f; break;
+            case ParamId::Decay: Retime(); break;
+            // Cutoff of the noise highpass: low is a fat snare, high is a crack.
+            case ParamId::Tone:  hp_.SetFreq(600.f + v * 6000.f); break;
+            case ParamId::Snap:  snap_ = 0.25f + v * 0.7f; break;
+            default: break;
+        }
+    }
+
+  private:
+    void Retime()
+    {
+        const float d = DecayTime(param(ParamId::Decay)) * 0.5f;
+        rattle_.SetTime(daisysp::ADENV_SEG_DECAY, d);
+        body_.SetTime(daisysp::ADENV_SEG_DECAY, d * 0.35f);
+        drop_coeff_ = expf(-1.f / (d * 0.08f * sr_ + 1.f));
+    }
+
+    daisysp::WhiteNoise noise_;
+    daisysp::AdEnv      crack_, rattle_, body_;
+    daisysp::Svf        hp_;
+    float sr_ = 48000.f, phase_ = 0.f, base_hz_ = 200.f;
+    float drop_ = 0.f, drop_coeff_ = 0.99f;
+    float snap_ = 0.6f, vel_ = 1.f;
+};
+
 } // namespace drom

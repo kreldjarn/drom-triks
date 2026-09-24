@@ -395,6 +395,13 @@ void Draw(uint32_t now_ms)
         std::printf("%-*s", kCellCols, kTrackName[i]);
 
     // Macro encoders, with the selected one marked.
+    std::printf("\n  machine  \033[1m%-10s\033[0m \033[2m%s on %s - n/N to change\033[0m",
+                MachineName(g_machine.machine(g_ui.selected_track())),
+                kMachineInfo[static_cast<int>(
+                                 g_machine.machine(g_ui.selected_track()))]
+                    .family,
+                kTrackName[g_ui.selected_track()]);
+
     // Named and valued through the Ui, not from the page: with SHIFT held the
     // macros are on master FX, and labelling them from the page would name one
     // parameter while the knob moves another.
@@ -430,7 +437,7 @@ void Draw(uint32_t now_ms)
                 "enter default  p page\n"
                 "  s shift (master FX)  l lock a step  b pattern  t tap  "
                 "[ ] tempo\n"
-                "  m mute mode  r record  esc quit\033[0m\n");
+                "  m mute mode  r record  n N machine  esc quit\033[0m\n");
     std::fflush(stdout);
 }
 
@@ -599,6 +606,24 @@ int main(int argc, char **argv)
                         g_ui.TransportRelease(Ui::Key::Patt);
                     break;
                 case 't': g_ui.TransportPress(Ui::Key::Tap); break;
+                case 'n':
+                case 'N':
+                {
+                    // Pushed straight at the machine, like tempo above: what
+                    // gesture selects a machine on the real panel is still an
+                    // open UI question, and inventing one here would prejudge
+                    // it. The playground only needs to audition them.
+                    const int n   = static_cast<int>(MachineId::Count);
+                    const int cur = static_cast<int>(
+                        g_machine.machine(g_ui.selected_track()));
+                    const int nxt = (cur + (ch == 'n' ? 1 : n - 1)) % n;
+                    Command   mc;
+                    mc.type  = Command::Type::SetMachine;
+                    mc.track = static_cast<uint8_t>(g_ui.selected_track());
+                    mc.param = static_cast<uint8_t>(nxt);
+                    g_machine.Push(mc);
+                    break;
+                }
                 case '\r':
                 case '\n': g_ui.EncoderPush(g_sel_enc); break;
                 case '-':

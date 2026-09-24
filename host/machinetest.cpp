@@ -269,6 +269,81 @@ int main()
               "and the loaded patch replaces the live one");
     }
 
+    std::printf("\nselectable machines:\n");
+    {
+        static Machine m;
+        m.Init(48000.f);
+
+        bool defaults_ok = true;
+        for(int i = 0; i < kNumTracks; ++i)
+            defaults_ok &= m.machine(i) == kDefaultMachine[i];
+        Check(defaults_ok, "every track powers on as its documented default");
+
+        // Audio has to actually change, not just the label.
+        auto Energy = [&](int track) {
+            Command t;
+            t.type = Command::Type::ToggleStep; t.track = (uint8_t)track; t.step = 0;
+            m.Push(t); Pump(m);
+            Command go; go.type = Command::Type::Start; m.Push(go);
+            float buf[64], sum = 0.f;
+            for(int b = 0; b < 200; ++b)
+            {
+                m.Process(buf, 32);
+                for(int i = 0; i < 64; ++i) sum += buf[i] * buf[i];
+            }
+            Command stop; stop.type = Command::Type::Stop; m.Push(stop); Pump(m);
+            m.Push(t); Pump(m); // toggle the step back off
+            return sum;
+        };
+
+        const float e_808 = Energy(0);
+        Command c;
+        c.type = Command::Type::SetMachine;
+        c.track = 0;
+        c.param = static_cast<uint8_t>(MachineId::BdBoom);
+        m.Push(c); Pump(m);
+        Check(m.machine(0) == MachineId::BdBoom, "a track can be given another machine");
+        const float e_boom = Energy(0);
+        Check(e_808 > 0.f && e_boom > 0.f, "both machines make sound");
+        Check(std::fabs(e_808 - e_boom) / (e_808 + e_boom) > 0.05f,
+              "and they are audibly different, not just relabelled");
+
+        // A new machine starts at its own defaults and knows nothing of the
+        // knobs, so the slot has to push the kit back into it.
+        Command k;
+        k.type = Command::Type::SetKitParam;
+        k.track = 1;
+        k.param = static_cast<uint8_t>(ParamId::Decay);
+        k.value = 0.83f;
+        m.Push(k); Pump(m);
+        c.track = 1;
+        c.param = static_cast<uint8_t>(MachineId::SdPunch);
+        m.Push(c); Pump(m);
+        Check(m.patch().kit.params[1][static_cast<int>(ParamId::Decay)] == 0.83f,
+              "the kit value survives a machine change");
+
+        c.param = static_cast<uint8_t>(MachineId::Count); // out of range
+        m.Push(c); Pump(m);
+        Check(m.machine(1) == MachineId::SdPunch, "an invalid machine id is refused");
+
+        // Machines are kit state, so they have to survive a flash round trip.
+        static RamFlash<kQspiBytes> flash2;
+        static Storage              st2;
+        static Patch                back2;
+        st2.Init(&flash2);
+        m.RequestSnapshot(&st2.staging()); Pump(m);
+        Check(st2.SaveStaged(7) == Storage::Result::Ok, "a patch with machines saves");
+
+        c.track = 1; c.param = static_cast<uint8_t>(MachineId::Clap);
+        m.Push(c); Pump(m);
+        Check(m.machine(1) == MachineId::Clap, "the live machine moves on");
+
+        Check(st2.LoadPatch(7, back2) == Storage::Result::Ok, "and loads back");
+        m.RequestLoad(&back2); Pump(m);
+        Check(m.machine(1) == MachineId::SdPunch,
+              "loading restores the machine the patch was saved with");
+    }
+
     std::printf("\nqueue overflow is survivable:\n");
     {
         static Machine m; m.Init(48000.f);

@@ -102,6 +102,58 @@ inline constexpr float kParamDefault[static_cast<int>(ParamId::Count)] = {
     0.5f, 0.5f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f,
 };
 
+/// Selectable synthesis machines. A track's sound is not fixed to its legend:
+/// any machine can go on any track, the way a Machinedrum works, so the panel
+/// silkscreen is a default rather than a constraint. Worth knowing before that
+/// legend is cut in metal — see docs/01-hardware.md §5.
+///
+/// The enum and its names live here, with ParamId, because the Kit stores a
+/// machine per track and patch.h must stay free of DaisySP. Construction lives
+/// in machines.h, which does not.
+enum class MachineId : uint8_t
+{
+    Silent = 0, ///< an unpopulated cartridge slot, or a deliberately dead track
+
+    BdAnalog,   ///< 808-style, tuned for punch
+    BdBoom,     ///< deep sine, long tail, slow sweep
+
+    SdSynth,    ///< 909-style, balanced noise and body
+    SdPunch,    ///< transient-forward crack over a fast-dropping body
+
+    HatClosed,
+    HatOpen,
+
+    Tom,
+    Clap,
+    RimShot,
+    FmPerc,
+
+    Count
+};
+
+struct MachineInfo
+{
+    const char *name;   ///< for the screen, kept short
+    const char *family; ///< groups the list; purely cosmetic
+};
+
+inline constexpr MachineInfo kMachineInfo[static_cast<int>(MachineId::Count)] = {
+    {"SILENT",   "--"},
+    {"BD 808",   "BD"},  {"BD BOOM", "BD"},
+    {"SD 909",   "SD"},  {"SD PUNCH", "SD"},
+    {"CH",       "HAT"}, {"OH",      "HAT"},
+    {"TOM",      "PERC"},{"CLAP",    "PERC"},
+    {"RIM",      "PERC"},{"FM",      "PERC"},
+};
+
+inline const char *MachineName(MachineId id)
+{
+    const int i = static_cast<int>(id);
+    return (i >= 0 && i < static_cast<int>(MachineId::Count)) ? kMachineInfo[i].name
+                                                             : "?";
+}
+
+
 /// A per-step parameter override. Value is 0..65535 mapping to the same 0..1
 /// range SetParam takes — 16 bits so a lock is indistinguishable from a knob
 /// position, and three bytes so a Step stays cache-friendly.
@@ -314,6 +366,20 @@ class VoiceSlot
 
     IVoice   *voice() { return voice_; }
     IChannel *channel() { return channel_; }
+
+    /// Point this slot at a different voice — after a machine change — and push
+    /// every stored value into it. A freshly constructed machine starts at its
+    /// own defaults and knows nothing of what the knobs currently say.
+    void Rebind(IVoice *voice)
+    {
+        voice_ = voice;
+        // The previous step's locks were applied to a voice that no longer
+        // exists, so there is nothing to restore and the mask must not survive.
+        locked_mask_   = 0;
+        last_lfo_dest_ = -1;
+        for(int i = 0; i < static_cast<int>(ParamId::Count); ++i)
+            Dispatch(static_cast<ParamId>(i), base_[i]);
+    }
 
   private:
     /// Restore whatever the previous step locked, then apply this step's locks.

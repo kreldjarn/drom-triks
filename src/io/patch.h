@@ -15,6 +15,11 @@ struct Kit
 {
     float params[kNumTracks][static_cast<int>(ParamId::Count)];
 
+    /// Which synthesis machine each track runs. Stored as the underlying type
+    /// rather than MachineId so this header stays free of DaisySP — a load must
+    /// range-check it, because a byte from flash is not a guarantee.
+    uint8_t machine[kNumTracks];
+
     /// Master delay, reverb and compressor settings. Global rather than
     /// per-track, and in the Kit rather than the Pattern because a kit is the
     /// "sound" half of a patch and delay time is part of a sound. Frozen at 16
@@ -23,6 +28,16 @@ struct Kit
     float fx[kNumFxParams];
 
     char  name[16];
+};
+
+/// What each track powers on as, chosen so a default kit sounds exactly as it
+/// did before machines were selectable.
+inline constexpr MachineId kDefaultMachine[kNumTracks] = {
+    MachineId::BdAnalog, MachineId::SdSynth, MachineId::HatClosed,
+    MachineId::HatOpen,  MachineId::Tom,     MachineId::Clap,
+    MachineId::RimShot,  MachineId::FmPerc,
+    MachineId::Silent,   MachineId::Silent,
+    MachineId::Silent,   MachineId::Silent,
 };
 
 /// Fixed track identities. The panel is legended in silkscreen, so these are
@@ -39,13 +54,16 @@ inline constexpr uint32_t kPatchMagic = 0x4D4F5244; // 'DROM'
 /// exactly the failure SaveHeader exists to catch. `payload_size` alone would
 /// have caught this one, but only because the size happened to change.
 ///
+/// Bumped to 4 when each track gained a selectable machine. Still before
+/// Phase 6, so still free — which is the rule the freeze actually states.
+///
 /// Bumped to 3 for the format freeze: kMaxLocks 4 -> 8 (resizing Step) and
 /// ParamId::Count 6 -> 32 (resizing Kit). Both were taken at once, and
 /// deliberately before Phase 6 writes anything real to flash, because every
 /// such change invalidates every stored pattern. Anything that alters
 /// sizeof(Patch) belongs on this side of that line — see
 /// docs/02-firmware.md §6.
-inline constexpr uint16_t kPatchVersion = 3;
+inline constexpr uint16_t kPatchVersion = 4;
 
 /// Guards a saved struct against being read by a different firmware version.
 ///
@@ -75,6 +93,8 @@ inline void InitKit(Kit &k)
             k.params[t][p] = kParamInfo[p].def;
     for(int i = 0; i < kNumFxParams; ++i)
         k.fx[i] = kFxDefault[i];
+    for(int t = 0; t < kNumTracks; ++t)
+        k.machine[t] = static_cast<uint8_t>(kDefaultMachine[t]);
     std::memset(k.name, 0, sizeof(k.name));
 }
 
