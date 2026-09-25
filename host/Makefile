@@ -24,6 +24,15 @@ DSP_SRCS      := $(shell find $(DAISYSP_DIR)/Source -name '*.cpp')
 DSP_LGPL_SRCS := $(shell find $(DAISYSP_LGPL_DIR)/Source -name '*.cpp')
 DSP_OBJS := $(patsubst $(DAISYSP_DIR)/Source/%.cpp,$(BUILD_DIR)/dsp/%.o,$(DSP_SRCS)) \
             $(patsubst $(DAISYSP_LGPL_DIR)/Source/%.cpp,$(BUILD_DIR)/dsp-lgpl/%.o,$(DSP_LGPL_SRCS))
+
+# DaisySP-LGPL is a submodule *of DaisySP*, so a one-level clone leaves it
+# empty and the only symptom is a wall of undefined references to ReverbSc and
+# Compressor at link time. Say so instead.
+ifeq ($(strip $(DSP_LGPL_SRCS)),)
+$(error DaisySP-LGPL has no sources. It is nested inside DaisySP, so a \
+one-level submodule checkout misses it. Fix with: \
+git submodule update --init --recursive)
+endif
 DSP_LIB  := $(BUILD_DIR)/libdaisysp_host.a
 
 ENGINE_HDRS := $(wildcard ../src/engine/*.h) $(wildcard ../src/engine/voices/*.h) \

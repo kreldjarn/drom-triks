@@ -1,9 +1,11 @@
 # Runs the six host suites on every push and PR.
 #
 # `make -C host test` deliberately excludes `play`, which is macOS-only
-# (CoreAudio), so the whole suite runs on a Linux runner. Only the DaisySP
-# submodule is needed — nothing under src/engine/ may include libDaisy, which
-# is what keeps this job cheap.
+# (CoreAudio), so the whole suite runs on a Linux runner. libDaisy is not
+# needed — nothing under src/engine/ may include it, which is what keeps this
+# job cheap — but DaisySP is, **and DaisySP-LGPL is a submodule of DaisySP**,
+# so the checkout has to be recursive. Its ReverbSc and Compressor are what
+# the master FX are built on.
 
 name: CI
 
@@ -18,7 +20,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          submodules: true
+          # recursive, not true: DaisySP-LGPL is nested one level further down.
+          submodules: recursive
 
       - name: Build and run every suite
         run: make -C host test

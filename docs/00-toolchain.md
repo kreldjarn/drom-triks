@@ -50,8 +50,12 @@ make libs        # libDaisy + DaisySP, a few minutes, once
 make             # the firmware, seconds
 ```
 
-**`--recurse-submodules` is not optional.** libDaisy has its own nested submodules (CMSIS, the
-STM32 HAL drivers). Without them the build dies on a missing `stm32h7xx_hal.h`. If you already
+**`--recurse-submodules` is not optional**, and there are now two reasons rather than one.
+libDaisy has nested submodules (CMSIS, the STM32 HAL drivers), without which the build dies on a
+missing `stm32h7xx_hal.h`. And **DaisySP-LGPL is a submodule of DaisySP** — the master reverb and
+compressor come from it ([firmware §5](02-firmware.md#5-voice-engine)), so a one-level checkout
+leaves the host build linking against an archive with no `ReverbSc` in it. `host/Makefile` checks
+for that case explicitly and says so, because the raw symptom is a wall of undefined references. If you already
 cloned without it:
 
 ```sh
