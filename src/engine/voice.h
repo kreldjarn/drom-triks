@@ -97,6 +97,30 @@ inline int NoteSemitones(float v)
     return static_cast<int>(s < 0.f ? s - 0.5f : s + 0.5f);
 }
 
+/// The inverse: the normalised value that lands exactly on `semitones`.
+inline float NoteNorm(int semitones)
+{
+    if(semitones < -kNoteRange) semitones = -kNoteRange;
+    if(semitones > kNoteRange) semitones = kNoteRange;
+    return 0.5f + static_cast<float>(semitones) / (2.f * static_cast<float>(kNoteRange));
+}
+
+/// Names a semitone offset as if the track's own pitch were C.
+///
+/// NOTE is an offset rather than an absolute pitch, so nothing here is really
+/// "F#" — it is "six semitones above whatever TUNE is set to". Naming them from
+/// an assumed root is the convention every groovebox uses, and it gives you the
+/// F#/C# vocabulary to think in without pretending the machine is concert-tuned.
+inline const char *NoteName(int semitones)
+{
+    static const char *const kNames[12]
+        = {"C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"};
+    int s = semitones % 12;
+    if(s < 0)
+        s += 12;
+    return kNames[s];
+}
+
 /// Power-on value for each parameter, indexed by ParamId.
 ///
 /// Lives here rather than in params.h because VoiceBase needs it and params.h

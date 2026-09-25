@@ -26,6 +26,8 @@ struct Command
         Snapshot,      ///< copy the patch to snapshot_dst_ for the main loop
         LoadPatch,     ///< adopt the patch at load_src_, from the main loop
         ToggleStep,    ///< track, step
+        SetStepActive, ///< track, step, value != 0 — set, not toggle
+        TriggerTrack,  ///< track, value = velocity — fire now, off the grid
         SetStepLock,   ///< track, step, param, value
         SetStepField,  ///< track, step, param = StepField, value 0..1
         ClearStepLocks,///< track, step

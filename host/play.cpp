@@ -395,6 +395,23 @@ void Draw(uint32_t now_ms)
         std::printf("%-*s", kCellCols, kTrackName[i]);
 
     // Macro encoders, with the selected one marked.
+    if(g_ui.mode() == Ui::Mode::Keyboard)
+    {
+        std::printf("\n  keyboard \033[1moct %+d\033[0m \033[2m(named from the track's own "
+                    "pitch; nav 0 shifts)\033[0m\n           ",
+                    g_ui.keyboard_octave());
+        for(int i = 0; i < kNumStepKeys; ++i)
+            std::printf("%-4s", NoteName(g_ui.KeyboardSemitone(i)));
+        std::printf("\n           ");
+        for(int i = 0; i < kNumStepKeys; ++i)
+            std::printf("%-4c", kStepKeys[i]);
+        if(g_ui.rec_armed())
+            std::printf("\n  \033[1;31mREC\033[0m writing to step %d, advances",
+                        g_ui.keyboard_cursor() + 1);
+        else
+            std::printf("\n  \033[2mREC off: keys audition. r to arm.\033[0m");
+    }
+
     std::printf("\n  swing    \033[1m%3u\033[0m \033[2m(%s, i/o to change; 50 straight)\033[0m",
                 g_machine.patch().pattern.tracks[g_ui.selected_track()].swing,
                 kTrackName[g_ui.selected_track()]);
@@ -440,7 +457,7 @@ void Draw(uint32_t now_ms)
                 "enter default  p page\n"
                 "  s shift (master FX)  l lock a step  b pattern  t tap  "
                 "[ ] tempo\n"
-                "  m mute mode  r record  n N machine  i o swing  esc quit\033[0m\n");
+                "  m mute mode  r record  n N machine  i o swing  u keyboard  esc quit\033[0m\n");
     std::fflush(stdout);
 }
 
@@ -609,6 +626,9 @@ int main(int argc, char **argv)
                         g_ui.TransportRelease(Ui::Key::Patt);
                     break;
                 case 't': g_ui.TransportPress(Ui::Key::Tap); break;
+                case 'u':
+                    g_ui.SetKeyboard(g_ui.mode() != Ui::Mode::Keyboard);
+                    break;
                 case 'i':
                 case 'o':
                 {

@@ -37,6 +37,7 @@ class Ui
         Play = 0, ///< step keys toggle steps on the selected track
         Mute,     ///< track keys mute/unmute instead of selecting
         Pattern,  ///< step keys load a pattern; with SHIFT, save one
+        Keyboard, ///< step keys are a chromatic keyboard for the selected track
     };
 
     /// The six transport keys. MUTE and PATTERN are **held**, like SHIFT, for
@@ -169,6 +170,37 @@ class Ui
         }
     }
 
+    /// Turn the sixteen step keys into a chromatic keyboard for the selected
+    /// track — key N is N semitones above the current octave.
+    ///
+    /// What it does with a press depends on REC, which is how hardware has
+    /// always done this: disarmed it auditions, armed it writes. Writing sets a
+    /// NOTE lock on the cursor step, turns that step on, and advances — step
+    /// entry, which is far quicker for a line than holding each step and
+    /// turning a knob.
+    void SetKeyboard(bool on)
+    {
+        const bool was = mode_ == Mode::Keyboard;
+        if(on == was)
+            return;
+        mode_      = on ? Mode::Keyboard : Mode::Play;
+        kb_cursor_ = 0;
+        EndGestures();
+    }
+
+    /// Octaves from the track's own pitch. Sixteen keys span fifteen semitones,
+    /// so the window moves rather than stretching.
+    void SetKeyboardOctave(int oct)
+    {
+        kb_octave_ = Clampi(oct, kKbOctaveMin, kKbOctaveMax);
+    }
+
+    int keyboard_octave() const { return kb_octave_; }
+    int keyboard_cursor() const { return kb_cursor_; }
+
+    /// The semitone offset step key `key` plays right now.
+    int KeyboardSemitone(int key) const { return kb_octave_ * 12 + key; }
+
     /// Set or clear MUTE. Held, like PATTERN.
     void SetMuteHeld(bool held)
     {
@@ -198,6 +230,11 @@ class Ui
         {
             SetPatternBank(Clampi(pattern_bank_ + delta, 0,
                                   static_cast<int>(kPatternSlots) / kNumStepKeys - 1));
+            return;
+        }
+        if(mode_ == Mode::Keyboard)
+        {
+            SetKeyboardOctave(kb_octave_ + delta);
             return;
         }
         Command c;
@@ -249,6 +286,40 @@ class Ui
         if(step < 0 || step >= kNumStepKeys || !machine_)
             return;
 
+        if(mode_ == Mode::Keyboard)
+        {
+            const float v = NoteNorm(KeyboardSemitone(step));
+            Command     c;
+            c.track = static_cast<uint8_t>(selected_track_);
+            if(rec_armed_)
+            {
+                c.type  = Command::Type::SetStepLock;
+                c.step  = static_cast<uint8_t>(kb_cursor_);
+                c.param = static_cast<uint8_t>(ParamId::Note);
+                c.value = v;
+                machine_->Push(c);
+                // Set rather than toggle: a note written to a step that is
+                // already on must not turn it off.
+                c.type  = Command::Type::SetStepActive;
+                c.value = 1.f;
+                machine_->Push(c);
+                kb_cursor_ = (kb_cursor_ + 1) % kNumStepKeys;
+            }
+            else
+            {
+                // Audition moves the track's own NOTE, which is what you are
+                // choosing when you play the keyboard with REC off.
+                c.type  = Command::Type::SetKitParam;
+                c.param = static_cast<uint8_t>(ParamId::Note);
+                c.value = v;
+                machine_->Push(c);
+                c.type  = Command::Type::TriggerTrack;
+                c.value = 1.f;
+                machine_->Push(c);
+            }
+            return;
+        }
+
         // In PATTERN mode a step key is a slot, not a step. Sixteen keys over
         // 128 slots, so the value encoder picks the bank.
         if(mode_ == Mode::Pattern)
@@ -273,7 +344,8 @@ class Ui
 
     void StepRelease(int step)
     {
-        if(mode_ == Mode::Pattern || step != held_step_)
+        if(mode_ == Mode::Pattern || mode_ == Mode::Keyboard
+           || step != held_step_)
             return;
         if(!wrote_lock_while_held_ && !shift_)
             ToggleStep(step);
@@ -626,6 +698,12 @@ class Ui
 
     static constexpr uint32_t kTapTimeoutMs = 2000;
 
+    /// Sixteen keys reach fifteen semitones, so +1 clips its top three against
+    /// NOTE's +/-24 range. Reaching two octaves down matters more than avoiding
+    /// that, since these are drum voices being played as instruments.
+    static constexpr int kKbOctaveMin = -2;
+    static constexpr int kKbOctaveMax = 1;
+
     Machine *machine_       = nullptr;
     Mode     mode_          = Mode::Play;
     uint32_t now_ms_        = 0;
@@ -638,6 +716,8 @@ class Ui
     bool   wrote_lock_while_held_ = false;
     bool   rec_armed_      = false;
     int    fx_bank_        = 0;
+    int    kb_octave_      = 0;
+    int    kb_cursor_      = 0;
     int    pattern_bank_   = 0;
     uint32_t last_tap_ms_  = 0;
     uint32_t tap_sum_      = 0;

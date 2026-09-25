@@ -358,6 +358,70 @@ int main()
         Check(ui.mode() == Ui::Mode::Play, "releasing PATT returns to play");
     }
 
+    std::printf("\nkeyboard mode:\n");
+    {
+        static Machine m; static Ui ui;
+        m.Init(48000.f); ui.Init(&m); ui.SetTime(1000);
+        ui.TrackPress(4);
+
+        ui.SetKeyboard(true);
+        Check(ui.mode() == Ui::Mode::Keyboard, "the step keys become a keyboard");
+        Check(ui.KeyboardSemitone(0) == 0 && ui.KeyboardSemitone(7) == 7,
+              "key N is N semitones up");
+
+        // REC off: play it. The track's own NOTE follows what you audition.
+        ui.StepPress(5);
+        Pump(m);
+        Check(NoteSemitones(
+                  m.patch().kit.params[4][static_cast<int>(ParamId::Note)]) == 5,
+              "with REC off a key auditions and sets the track's note");
+        Check(!m.patch().pattern.tracks[4].steps[0].active(),
+              "and writes nothing to the pattern");
+
+        // REC on: write it. Cursor advances so a line goes in as fast as you
+        // can play it.
+        ui.TransportPress(Ui::Key::Rec);
+        Check(ui.rec_armed(), "REC arms");
+        Check(ui.keyboard_cursor() == 0, "the cursor starts at step 0");
+
+        const int line[4] = {0, 3, 7, 10};
+        for(int i = 0; i < 4; ++i)
+            ui.StepPress(line[i]);
+        Pump(m);
+        Check(ui.keyboard_cursor() == 4, "four notes advance the cursor four steps");
+
+        bool wrote = true;
+        for(int i = 0; i < 4; ++i)
+        {
+            const Step &s = m.patch().pattern.tracks[4].steps[i];
+            wrote &= s.active();
+            bool found = false;
+            for(uint8_t k = 0; k < s.lock_count; ++k)
+                if(s.locks[k].param_id == static_cast<uint8_t>(ParamId::Note)
+                   && NoteSemitones(s.locks[k].as_float()) == line[i])
+                    found = true;
+            wrote &= found;
+        }
+        Check(wrote, "each step is on and carries the note that was played");
+
+        // Writing to a step that is already on must not turn it off — which is
+        // why this is SetStepActive rather than ToggleStep.
+        ui.StepPress(2);
+        Pump(m);
+        Check(m.patch().pattern.tracks[4].steps[4].active(),
+              "and a note over an existing step leaves it on");
+
+        // The octave moves the window rather than stretching it.
+        ui.NavTurn(0, -1);
+        Check(ui.keyboard_octave() == -1 && ui.KeyboardSemitone(0) == -12,
+              "nav 0 shifts the keyboard an octave");
+        ui.NavTurn(0, -9);
+        Check(ui.keyboard_octave() == -2, "and clamps at the bottom");
+
+        ui.SetKeyboard(false);
+        Check(ui.mode() == Ui::Mode::Play, "leaving returns to play");
+    }
+
     std::printf("\nNOTE turns in semitones:\n");
     {
         static Machine m; static Ui ui;

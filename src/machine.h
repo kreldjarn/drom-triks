@@ -242,6 +242,28 @@ class Machine
                 }
                 break;
 
+            case Command::Type::SetStepActive:
+                // Distinct from ToggleStep because step entry needs to *set*:
+                // toggling a step that is already on turns it off, which is the
+                // opposite of writing a note to it.
+                if(c.step < kMaxSteps)
+                {
+                    Step &s = patch_.pattern.tracks[t].steps[c.step];
+                    if(c.value != 0.f)
+                        s.flags |= kStepActive;
+                    else
+                        s.flags &= static_cast<uint8_t>(~kStepActive);
+                }
+                break;
+
+            // Fires immediately rather than on the grid — auditioning a pitch
+            // from the keyboard, where waiting for the next step defeats the
+            // point. Offset 0 is this sample, which is as accurate as anything
+            // arriving from the main loop can be.
+            case Command::Type::TriggerTrack:
+                slots_[t].Schedule(0, c.value > 0.f ? c.value : 1.f, nullptr, 0);
+                break;
+
             case Command::Type::ToggleStep:
                 if(c.step < kMaxSteps)
                 {

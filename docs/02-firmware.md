@@ -585,6 +585,7 @@ Modes, with `SHIFT` as a held modifier rather than a latched state:
 | **SHIFT** alone | — | **master FX**, in two banks of eight |
 | **MUTE** (held) | — (track keys mute/unmute) | unchanged |
 | **PATTERN** (held) | load that slot; **SHIFT + step** saves to it | unchanged |
+| **KEYBOARD** | a chromatic keyboard for the selected track — see below | unchanged |
 | **REC + play** | live record from track keys, quantise optional | live-record turns as locks |
 
 **MUTE and PATTERN are held, not latched**, for the same reason SHIFT is: a held modifier has no
@@ -603,6 +604,33 @@ are already holding a step, in which case it makes it local to that step.**
 Both nav encoders **clamp rather than reject** at their limits. A detent is normally ±1, but the
 10 kHz scan coalesces a fast spin into a larger delta, and rejecting that would make a quick flick
 near either end do nothing — which reads as a dead encoder rather than as a limit.
+
+### Keyboard mode
+
+The sixteen step keys become a chromatic keyboard for the selected track: key N plays N semitones
+above the current octave, and a nav encoder moves that window. What a press *does* depends on REC,
+which is how hardware has always done this:
+
+| REC | A key press |
+| --- | --- |
+| off | **auditions** — sets the track's own NOTE and fires it immediately |
+| armed | **writes** — a NOTE lock on the cursor step, turns that step on, advances the cursor |
+
+Step entry is the point. Holding each step and turning a knob is fine for fixing one note and
+hopeless for writing a line.
+
+Two things this needed that did not exist. **`SetStepActive`**, distinct from `ToggleStep`, because
+writing a note to a step that is already on must not turn it off. And **`TriggerTrack`**, which
+fires a voice off the grid at offset 0 — waiting for the next step defeats the point of auditioning.
+
+Sixteen keys reach fifteen semitones, so the octave window moves rather than stretching, and at
++1 its top three keys clip against NOTE's ±24 range. Reaching two octaves down matters more than
+avoiding that, given these are drum voices being played as instruments.
+
+**The keys are named from the track's own pitch, not from concert pitch.** NOTE is an offset, so
+nothing here is really F# — it is six semitones above wherever TUNE sits. Naming them from an
+assumed root is what every groovebox does and it gives you the vocabulary without pretending the
+machine is tuned.
 
 ### The UI never touches flash
 
