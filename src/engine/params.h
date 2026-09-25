@@ -26,7 +26,7 @@ inline constexpr ParamInfo kParamInfo[static_cast<int>(ParamId::Count)] = {
     // Page 1: INST
     DROM_P(Tune, "TUNE"),   DROM_P(Decay, "DECAY"), DROM_P(Tone, "TONE"),
     DROM_P(Snap, "SNAP"),   DROM_P(Drive, "DRIVE"), DROM_P(Level, "LEVEL"),
-    DROM_P(Pan, "PAN"),     DROM_R(InstRsv1),
+    DROM_P(Pan, "PAN"),     DROM_P(Note, "NOTE"),
 
     // Page 2: FLTR
     DROM_P(SatDrive, "SAT"),

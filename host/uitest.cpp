@@ -358,6 +358,35 @@ int main()
         Check(ui.mode() == Ui::Mode::Play, "releasing PATT returns to play");
     }
 
+    std::printf("\nNOTE turns in semitones:\n");
+    {
+        static Machine m; static Ui ui;
+        m.Init(48000.f); ui.Init(&m); ui.SetTime(1000);
+
+        // One detent, one semitone. The default 1/256 step would be five clicks
+        // per semitone, all of them silent.
+        const int note = 7; // the eighth macro on the INST page
+        ui.EncoderTurn(note, 1);
+        Pump(m);
+        const float after_one
+            = m.patch().kit.params[0][static_cast<int>(ParamId::Note)];
+        Check(NoteSemitones(after_one) == 1, "one detent moves one semitone up");
+
+        ui.SetTime(1100);
+        ui.EncoderTurn(note, 11);
+        Pump(m);
+        Check(NoteSemitones(
+                  m.patch().kit.params[0][static_cast<int>(ParamId::Note)]) == 12,
+              "and eleven more reaches the octave exactly");
+
+        ui.SetTime(1200);
+        ui.EncoderTurn(note, -24);
+        Pump(m);
+        Check(NoteSemitones(
+                  m.patch().kit.params[0][static_cast<int>(ParamId::Note)]) == -12,
+              "and it goes down as cleanly as it goes up");
+    }
+
     std::printf("\nwhat a knob says it is doing:\n");
     {
         // Anything that draws must agree with what a turn would write. Naming a
@@ -369,7 +398,11 @@ int main()
 
         Check(Eq(ui.MacroContext(), "INST"), "defaults to the INST page");
         Check(Eq(ui.MacroName(0), "TUNE"), "macro 0 is TUNE there");
-        Check(Eq(ui.MacroName(7), "--"), "and the reserved eighth says so");
+        Check(Eq(ui.MacroName(7), "NOTE"), "and the eighth is NOTE, beside TUNE");
+
+        ui.SetPage(2); // FX: mostly reserved, so the inactive label still shows
+        Check(Eq(ui.MacroName(7), "--"), "a genuinely reserved slot still says so");
+        ui.SetPage(0);
 
         ui.SetPage(1);
         Check(Eq(ui.MacroContext(), "FLTR"), "the filter page names itself");

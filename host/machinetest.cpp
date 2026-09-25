@@ -389,6 +389,44 @@ int main()
         Check(ms[4] > 4.f * ms[0], "with real range end to end");
     }
 
+    std::printf("\nNOTE transposes, per step:\n");
+    {
+        Check(NoteSemitones(0.5f) == 0, "centre is no transposition");
+        Check(NoteSemitones(1.0f) == kNoteRange, "the top is +24 semitones");
+        Check(NoteSemitones(0.0f) == -kNoteRange, "the bottom is -24");
+        // Quantised on purpose: a pitch between semitones is not a pitch.
+        const float octave_up = 0.5f + 12.f / (2.f * kNoteRange);
+        Check(NoteSemitones(octave_up) == 12, "and an octave lands exactly on 12");
+
+        // End to end: an octave up must actually double the pitch. Counted by
+        // zero crossings, which is what a doubling looks like from outside.
+        auto Crossings = [](float note) {
+            static MachineSlot s;
+            s.Init(48000.f, MachineId::Tom);
+            IVoice *v = s.voice();
+            v->SetParam(ParamId::Tune, 0.5f);
+            v->SetParam(ParamId::Decay, 0.6f);
+            v->SetParam(ParamId::Drive, 0.f);
+            v->SetParam(ParamId::Level, 0.8f);
+            v->SetParam(ParamId::Note, note);
+            v->Trigger(1.f);
+            int   zc = 0;
+            float prev = 0.f;
+            for(int i = 0; i < 24000; ++i)
+            {
+                const float y = v->Process();
+                if(i > 2000 && (y >= 0.f) != (prev >= 0.f)) ++zc;
+                prev = y;
+            }
+            return zc;
+        };
+        const int base = Crossings(0.5f);
+        const int up   = Crossings(octave_up);
+        std::printf("      %d crossings at centre, %d an octave up\n", base, up);
+        Check(base > 0 && up > base * 1.7 && up < base * 2.3,
+              "an octave up roughly doubles the pitch");
+    }
+
     std::printf("\nthe triangle stays bounded:\n");
     {
         // Every other machine is an envelope times an oscillator and cannot run

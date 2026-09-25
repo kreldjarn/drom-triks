@@ -526,6 +526,29 @@ at maximum micro and swing played **4 of its 8 steps**, and a speed-2 track at m
 **none at all**. It is a silent failure at the intersection of three unrelated settings, it predates
 swing, and a test now sweeps all three speeds for it.
 
+### Playing notes
+
+`NOTE` is a **semitone offset on top of TUNE**, four octaves either way, and it is p-lockable like
+anything else — which is the whole feature. Lock it to a different value on each step and the track
+plays a line instead of a repeated hit, without a note field on `Step`, a second data model, or a
+format change: the eighth INST slot had been reserved since the freeze precisely so something real
+could land there.
+
+It offsets rather than replaces TUNE, because that is already what
+[MIDI §5](06-midi.md#5-note-mapping--two-modes) specifies for note input in Multi mode — so a
+sequenced note and a played note mean the same thing.
+
+Three details:
+
+- **It is quantised to semitones.** A pitch between semitones is not a pitch anyone asked for, and
+  the point is to be able to say F# rather than 0.42.
+- **One detent is one semitone.** Over 48 semitones the default 1/256 encoder step would be five
+  clicks per semitone, every one of them inaudible, so `Ui::StepForTarget` gives quantised
+  parameters their own step and no acceleration.
+- **Every voice multiplies its frequency by `VoiceBase::PitchMul()`.** The voice recomputes when
+  NOTE changes by re-running its own TUNE handler, rather than thirteen machines each watching two
+  parameters and each having to combine them the same way.
+
 **Parameter locks** are the feature worth building the data model around. Hold a step key, turn
 a knob, and that knob's value is recorded for that step only. Eight lock slots per step, because
 with four pages of eight parameters four slots is a rationing exercise rather than an expressive

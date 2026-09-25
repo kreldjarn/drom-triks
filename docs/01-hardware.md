@@ -73,7 +73,7 @@ Four pages, 32 parameters:
 
 | Page | What the eight knobs are |
 | --- | --- |
-| **INST** | TUNE · DECAY · TONE · SNAP · DRIVE · LEVEL · PAN · *reserved* |
+| **INST** | TUNE · DECAY · TONE · SNAP · DRIVE · LEVEL · PAN · NOTE |
 | **FLTR** | SAT · CUT 1 · RES 1 · MODE 1 · CUT 2 · RES 2 · MODE 2 · *reserved* |
 | **FX** | DLY SND · REV SND · *six reserved* |
 | **LFO** | SPEED · MULT · FADE · DEST · WAVE · MODE · DEPTH · PHASE |
@@ -101,6 +101,7 @@ The INST page is where the fixed mapping is load-bearing:
 | DRIVE | drive | drive | drive | drive | drive | drive |
 | LEVEL | level | level | level | level | level | level |
 | PAN | placement in the shared stereo field — identical on every voice | | | | | |
+| NOTE | semitone transpose on top of TUNE — identical on every voice | | | | | |
 
 **The legend is a default, not a constraint.** Any machine can go on any track
 ([firmware §5](02-firmware.md#machines-are-selectable-per-track)), the way a Machinedrum works —
@@ -115,8 +116,9 @@ where the mapping is a stretch — a knob that does nothing on some tracks is wo
 does something mild.
 
 **That rule is about a knob being dead on *some* tracks.** A slot left unused consistently across a
-whole page is a different thing and is honest, which is why the eighth INST slot stays reserved
-rather than being filled with an invented parameter.
+whole page is a different thing and is honest — which is why the eighth INST slot sat reserved
+until there was something real for it. NOTE is that something: every machine has a frequency, so it
+means the same thing everywhere.
 
 Cartridges can't be tabulated here because the point of them is that they change. Each one carries
 its own mapping in an on-board EEPROM and the UI reads it at boot

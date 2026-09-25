@@ -1,4 +1,5 @@
 #pragma once
+#include <cmath>
 #include <cstdint>
 #include "lfo.h"
 
@@ -31,7 +32,7 @@ enum class ParamId : uint8_t
     Drive,
     Level,
     Pan,
-    InstRsv1,
+    Note,       ///< semitone offset on top of TUNE, quantised
 
     // --- Page 2: FLTR -------------------------------------------------------
     // Two filters in series with a saturator driving them.
@@ -79,6 +80,23 @@ inline constexpr int kNumPages      = 4;
 static_assert(static_cast<int>(ParamId::Count) == kNumPages * kParamsPerPage,
               "the ParamId space must be exactly the pages the panel can reach");
 
+/// NOTE spans four octaves, +/-24 semitones about centre, and is **quantised**.
+///
+/// A pitch that lands between semitones is not a pitch anyone asked for, and
+/// the whole point is to be able to say F# rather than 0.42. Same reasoning as
+/// the filter mode and the LFO wave: these arrive as floats or as a uint16 over
+/// 0..1 and the rounding has to be deliberate.
+///
+/// It offsets TUNE rather than replacing it — TUNE stays the voice's own base,
+/// which is what docs/06-midi.md §5 already specifies for MIDI note input.
+inline constexpr int kNoteRange = 24;
+
+inline int NoteSemitones(float v)
+{
+    const float s = (v - 0.5f) * 2.f * kNoteRange;
+    return static_cast<int>(s < 0.f ? s - 0.5f : s + 0.5f);
+}
+
 /// Power-on value for each parameter, indexed by ParamId.
 ///
 /// Lives here rather than in params.h because VoiceBase needs it and params.h
@@ -89,7 +107,8 @@ static_assert(static_cast<int>(ParamId::Count) == kNumPages * kParamsPerPage,
 /// parameter that later becomes a filter cutoff would otherwise power on fully
 /// closed, i.e. silent, and the cause would not be obvious.
 inline constexpr float kParamDefault[static_cast<int>(ParamId::Count)] = {
-    // INST: Tune Decay Tone  Snap  Drive Level Pan   rsv
+    // INST: Tune Decay Tone  Snap  Drive Level Pan   Note
+    //   Note centres at 0.5, which is no offset.
     0.5f, 0.5f, 0.5f, 0.5f, 0.0f, 0.8f, 0.5f, 0.5f,
     // FLTR: Sat  F1cut F1res F1mod F2cut F2res F2mod rsv
     //   Both cutoffs default wide open. A lowpass at cutoff 0 is silence, and
@@ -514,6 +533,16 @@ class VoiceBase : public IVoice
         if(value < 0.f) value = 0.f;
         if(value > 1.f) value = 1.f;
         params_[static_cast<int>(id)] = value;
+
+        if(id == ParamId::Note)
+        {
+            pitch_mul_ = std::pow(2.f, NoteSemitones(value) / 12.f);
+            // A voice works out its frequency when TUNE changes, so make it do
+            // that again rather than making all thirteen of them watch two
+            // parameters and remember to combine them the same way.
+            OnParam(ParamId::Tune, params_[static_cast<int>(ParamId::Tune)]);
+            return;
+        }
         OnParam(id, value);
     }
 
@@ -537,6 +566,11 @@ class VoiceBase : public IVoice
 
     float param(ParamId id) const { return params_[static_cast<int>(id)]; }
 
+    /// Frequency multiplier from NOTE: 2^(semitones/12). Every voice's TUNE
+    /// handler multiplies by this, which is what turns a per-step NOTE p-lock
+    /// into a melody.
+    float PitchMul() const { return pitch_mul_; }
+
     /// Soft saturation, then output gain. Drive at 0 is unity and clean.
     float Shape(float x) const
     {
@@ -548,6 +582,7 @@ class VoiceBase : public IVoice
     }
 
     float params_[static_cast<int>(ParamId::Count)] = {};
+    float pitch_mul_ = 1.f;
 };
 
 /// An analog cartridge slot with nothing plugged into it.

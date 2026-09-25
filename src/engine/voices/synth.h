@@ -77,7 +77,7 @@ class Tom : public VoiceBase
     {
         switch(id)
         {
-            case ParamId::Tune: base_hz_ = 60.f + v * 240.f; break;
+            case ParamId::Tune: base_hz_ = (60.f + v * 240.f) * PitchMul(); break;
             case ParamId::Decay: Retime(); break;
             case ParamId::Tone: sweep_amt_ = v; break;
             // SNAP shortens the pitch sweep, turning a soft tom into a hard hit.
@@ -165,7 +165,7 @@ class Clap : public VoiceBase
     {
         switch(id)
         {
-            case ParamId::Tune: bpf_.SetFreq(600.f + v * 1800.f); break;
+            case ParamId::Tune: bpf_.SetFreq((600.f + v * 1800.f) * PitchMul()); break;
             case ParamId::Decay: Retime(); break;
             case ParamId::Tone: bpf_.SetRes(0.1f + v * 0.7f); break;
             // 5–25 ms between bursts; past ~30 ms it stops fusing into one clap.
@@ -234,7 +234,7 @@ class RimShot : public VoiceBase
     {
         switch(id)
         {
-            case ParamId::Tune: base_hz_ = 200.f + v * 600.f; Retune(); break;
+            case ParamId::Tune: base_hz_ = (200.f + v * 600.f) * PitchMul(); Retune(); break;
             case ParamId::Decay: Retime(); break;
             case ParamId::Tone: bpf_.SetFreq(400.f + v * 3000.f); break;
             case ParamId::Snap: detune_ = 1.1f + v * 0.9f; Retune(); break;
@@ -399,7 +399,7 @@ class FmVoice : public VoiceBase
     {
         switch(id)
         {
-            case ParamId::Tune: base_hz_ = 40.f + v * 760.f; break;
+            case ParamId::Tune: base_hz_ = (40.f + v * 760.f) * PitchMul(); break;
             case ParamId::Decay: Retime(); break;
             // Integer ratios stay harmonic; the space between them is where
             // the metallic, inharmonic tones live. The useful range spans both.
@@ -545,7 +545,7 @@ class BassDrumBoom : public VoiceBase
     {
         switch(id)
         {
-            case ParamId::Tune:  base_hz_ = 25.f + v * 45.f; break;
+            case ParamId::Tune:  base_hz_ = (25.f + v * 45.f) * PitchMul(); break;
             case ParamId::Decay: Retime(); break;
             case ParamId::Tone:  tone_ = v; break;
             // Up to four octaves of drop. Past that it stops reading as a kick.
@@ -649,7 +649,7 @@ class SnareDrumPunch : public VoiceBase
     {
         switch(id)
         {
-            case ParamId::Tune:  base_hz_ = 140.f + v * 260.f; break;
+            case ParamId::Tune:  base_hz_ = (140.f + v * 260.f) * PitchMul(); break;
             case ParamId::Decay: Retime(); break;
             // Cutoff of the noise highpass: low is a fat snare, high is a crack.
             case ParamId::Tone:  hp_.SetFreq(600.f + v * 6000.f); break;
@@ -740,7 +740,7 @@ class BassDrum909 : public VoiceBase
     {
         switch(id)
         {
-            case ParamId::Tune:  base_hz_ = 40.f + v * 50.f; break;
+            case ParamId::Tune:  base_hz_ = (40.f + v * 50.f) * PitchMul(); break;
             case ParamId::Decay: Retime(); break;
             case ParamId::Tone:  click_amt_ = v * 0.8f; break;
             // Shallower and faster than the boom machine: a 909 drop is over
@@ -819,7 +819,7 @@ class SnareDrum808 : public VoiceBase
     {
         switch(id)
         {
-            case ParamId::Tune:  d_.SetFreq(150.f + v * 300.f); break;
+            case ParamId::Tune:  d_.SetFreq((150.f + v * 300.f) * PitchMul()); break;
             case ParamId::Decay: Retime(); break;
             case ParamId::Tone:  d_.SetTone(v); break;
             case ParamId::Snap:  d_.SetSnappy(v); break;
@@ -901,7 +901,7 @@ class GlitchPerc : public VoiceBase
     {
         switch(id)
         {
-            case ParamId::Tune:  base_hz_ = 80.f + v * 1600.f; break;
+            case ParamId::Tune:  base_hz_ = (80.f + v * 1600.f) * PitchMul(); break;
             case ParamId::Decay: Retime(); break;
             case ParamId::Tone:
                 crush_.SetBitcrushFactor(0.15f + v * 0.85f);
@@ -1021,7 +1021,7 @@ class Triangle : public VoiceBase
         switch(id)
         {
             // Triangles live high. Below about 700 Hz it stops reading as one.
-            case ParamId::Tune: base_hz_ = 700.f + v * 3300.f; Recalculate(); break;
+            case ParamId::Tune: base_hz_ = (700.f + v * 3300.f) * PitchMul(); Recalculate(); break;
             case ParamId::Decay: Recalculate(); break;
             case ParamId::Tone:  bright_ = v; Recalculate(); break;
             case ParamId::Snap:  stretch_ = v; Recalculate(); break;

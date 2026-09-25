@@ -312,7 +312,7 @@ class Ui
             = turning_[enc] && (now_ms_ - last_turn_ms_[enc] <= kEditContinueMs);
 
         float v = continuing ? edit_value_[enc] : CurrentValueFor(tgt);
-        v += delta * (continuing ? StepFor(enc) : kFineStep);
+        v += delta * StepForTarget(enc, tgt, continuing);
         Emit(enc, tgt, Clampf(v, 0.f, 1.f));
     }
 
@@ -417,6 +417,18 @@ class Ui
     {
         for(int i = 0; i < kNumMacros; ++i)
             turning_[i] = false;
+    }
+
+    /// A quantised parameter wants one detent per value, not per 1/256 — and no
+    /// acceleration, because there is nothing between the values to accelerate
+    /// through. NOTE spans 48 semitones, so the default fine step would be five
+    /// clicks a semitone and every one of them inaudible.
+    float StepForTarget(int enc, const Target &t, bool continuing) const
+    {
+        if(t.kind == Target::Kind::Param
+           && static_cast<ParamId>(t.index) == ParamId::Note)
+            return 1.f / (2.f * static_cast<float>(kNoteRange));
+        return continuing ? StepFor(enc) : kFineStep;
     }
 
     float StepFor(int enc) const

@@ -33,7 +33,7 @@ class BassDrum : public VoiceBase
     {
         switch(id)
         {
-            case ParamId::Tune: d_.SetFreq(30.f + v * 70.f); break;
+            case ParamId::Tune: d_.SetFreq((30.f + v * 70.f) * PitchMul()); break;
             case ParamId::Decay: d_.SetDecay(v); break;
             case ParamId::Tone: d_.SetTone(v); break;
             case ParamId::Snap:
@@ -85,7 +85,7 @@ class SnareDrum : public VoiceBase
     {
         switch(id)
         {
-            case ParamId::Tune: d_.SetFreq(120.f + v * 280.f); break;
+            case ParamId::Tune: d_.SetFreq((120.f + v * 280.f) * PitchMul()); break;
             case ParamId::Decay: d_.SetDecay(v); break;
             // This model has no tone control; FM amount shapes the body in a
             // comparable way, from hollow to metallic.
@@ -127,7 +127,7 @@ class HiHatVoice : public VoiceBase
     {
         switch(id)
         {
-            case ParamId::Tune: d_.SetFreq(3000.f + v * 9000.f); break;
+            case ParamId::Tune: d_.SetFreq((3000.f + v * 9000.f) * PitchMul()); break;
             case ParamId::Decay: d_.SetDecay(v); break;
             case ParamId::Tone: d_.SetTone(v); break;
             case ParamId::Snap: d_.SetNoisiness(v); break;
