@@ -81,6 +81,10 @@ $(BUILD_DIR)/locktest: locktest.cpp $(ENGINE_HDRS)
 	@mkdir -p $(BUILD_DIR)
 	$(CXX) $(CXXFLAGS) locktest.cpp -o $@
 
+$(BUILD_DIR)/sysextest: sysextest.cpp $(ENGINE_HDRS)
+	@mkdir -p $(BUILD_DIR)
+	$(CXX) $(CXXFLAGS) sysextest.cpp -o $@
+
 $(BUILD_DIR)/storagetest: storagetest.cpp $(ENGINE_HDRS)
 	@mkdir -p $(BUILD_DIR)
 	$(CXX) $(CXXFLAGS) storagetest.cpp -o $@
@@ -101,7 +105,7 @@ $(BUILD_DIR)/clocktest: clocktest.cpp $(ENGINE_HDRS)
 	@mkdir -p $(BUILD_DIR)
 	$(CXX) $(CXXFLAGS) clocktest.cpp -o $@
 
-.PHONY: seqtest locktest clocktest storagetest lfotest striptest fxtest uitest machinetest uxtest play
+.PHONY: seqtest locktest clocktest sysextest storagetest lfotest striptest fxtest uitest machinetest uxtest play
 seqtest:     $(BUILD_DIR)/seqtest;     $<
 locktest:    $(BUILD_DIR)/locktest;    $<
 clocktest:   $(BUILD_DIR)/clocktest;   $<
@@ -109,6 +113,7 @@ striptest:   $(BUILD_DIR)/striptest;   $<
 fxtest:      $(BUILD_DIR)/fxtest;      $<
 lfotest:     $(BUILD_DIR)/lfotest;     $<
 storagetest: $(BUILD_DIR)/storagetest; $<
+sysextest:   $(BUILD_DIR)/sysextest;   $<
 uitest:      $(BUILD_DIR)/uitest;      $<
 machinetest: $(BUILD_DIR)/machinetest; $<
 uxtest:      $(BUILD_DIR)/uxtest;      $<
@@ -118,10 +123,10 @@ run: $(BUILD_DIR)/render
 	$(BUILD_DIR)/render $(BUILD_DIR)/out.wav
 
 test: $(BUILD_DIR)/seqtest $(BUILD_DIR)/locktest $(BUILD_DIR)/clocktest \
-      $(BUILD_DIR)/storagetest $(BUILD_DIR)/lfotest $(BUILD_DIR)/striptest $(BUILD_DIR)/fxtest $(BUILD_DIR)/uitest $(BUILD_DIR)/machinetest \
+      $(BUILD_DIR)/sysextest $(BUILD_DIR)/storagetest $(BUILD_DIR)/lfotest $(BUILD_DIR)/striptest $(BUILD_DIR)/fxtest $(BUILD_DIR)/uitest $(BUILD_DIR)/machinetest \
       $(BUILD_DIR)/uxtest $(BUILD_DIR)/render
 	@$(BUILD_DIR)/seqtest && $(BUILD_DIR)/locktest && $(BUILD_DIR)/clocktest \
-	  && $(BUILD_DIR)/storagetest && $(BUILD_DIR)/lfotest && $(BUILD_DIR)/striptest && $(BUILD_DIR)/fxtest \
+	  && $(BUILD_DIR)/sysextest && $(BUILD_DIR)/storagetest && $(BUILD_DIR)/lfotest && $(BUILD_DIR)/striptest && $(BUILD_DIR)/fxtest \
 	  && $(BUILD_DIR)/uitest && $(BUILD_DIR)/machinetest \
 	  && $(BUILD_DIR)/uxtest && $(BUILD_DIR)/render --selftest
 

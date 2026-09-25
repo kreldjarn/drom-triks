@@ -279,6 +279,11 @@ be upset to lose — and **control**, so the machine can be driven from a comput
 Manufacturer ID **`0x7D`** — the non-commercial/educational ID, correct for a DIY instrument and
 guaranteed not to collide with real gear.
 
+Implemented in **`src/io/sysex.h`**, deliberately free of DaisySP and libDaisy so the codec, the
+frame validation, the range checks and the chunk reassembly all test natively — every bug this can
+have is a data bug, and those are miserable to chase down a MIDI cable. The parser is device-side
+only: it handles host→device messages and builds the replies, and a host library parses those.
+
 ```
 F0 7D <dev> <cmd> <data...> F7
 ```
