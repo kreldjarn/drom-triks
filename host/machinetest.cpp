@@ -389,6 +389,59 @@ int main()
         Check(ms[4] > 4.f * ms[0], "with real range end to end");
     }
 
+    std::printf("\nthe triangle stays bounded:\n");
+    {
+        // Every other machine is an envelope times an oscillator and cannot run
+        // away. This one is six near-unity-Q resonators, which is the shape that
+        // actually can — so sweep the parameter space rather than spot-check it.
+        auto Run = [](float tune, float dec, float tone, float snap,
+                      float &peak, float &early, float &late) {
+            static MachineSlot s;
+            s.Init(48000.f, MachineId::Triangle);
+            IVoice *v = s.voice();
+            v->SetParam(ParamId::Tune, tune);
+            v->SetParam(ParamId::Decay, dec);
+            v->SetParam(ParamId::Tone, tone);
+            v->SetParam(ParamId::Snap, snap);
+            v->SetParam(ParamId::Drive, 0.f);
+            v->SetParam(ParamId::Level, 0.8f);
+            v->Trigger(1.f);
+            peak = early = late = 0.f;
+            const int n = 48000;
+            for(int i = 0; i < n; ++i)
+            {
+                const float m = std::fabs(v->Process());
+                if(m > peak) peak = m;
+                if(i < n / 10 && m > early) early = m;
+                if(i > n - n / 10 && m > late) late = m;
+            }
+        };
+
+        int  unstable = 0, growing = 0;
+        float worst = 0.f;
+        for(int a = 0; a <= 2; ++a)
+            for(int b = 0; b <= 2; ++b)
+                for(int c = 0; c <= 2; ++c)
+                    for(int d = 0; d <= 2; ++d)
+                    {
+                        float pk, e, l;
+                        Run(a / 2.f, b / 2.f, c / 2.f, d / 2.f, pk, e, l);
+                        if(!(pk < 2.f) || pk != pk) ++unstable;
+                        if(l > e) ++growing;
+                        if(pk > worst) worst = pk;
+                    }
+        std::printf("      81 settings, worst peak %.3f\n", worst);
+        Check(unstable == 0, "no setting produces an unbounded or NaN output");
+        Check(growing == 0, "and none grows louder over a second than it started");
+
+        // The long inharmonic ring is the whole point; a short one is a rimshot.
+        float pk, e, l;
+        Run(0.4f, 0.2f, 0.5f, 0.3f, pk, e, l);
+        const float shortish = l;
+        Run(0.4f, 0.9f, 0.5f, 0.3f, pk, e, l);
+        Check(l > shortish * 4.f, "DECAY buys a dramatically longer ring");
+    }
+
     std::printf("\nqueue overflow is survivable:\n");
     {
         static Machine m; m.Init(48000.f);

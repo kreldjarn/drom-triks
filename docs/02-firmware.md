@@ -177,8 +177,23 @@ outgrowing the slot silently.
 | `SD 808` | 74 ms | the 808 model with the envelope that makes DECAY work — see below |
 | `SD PUNCH` | 68 ms | transient-forward; its noise dies rather than hissing on |
 | `GLITCH` | 49–339 ms | bursts of crushed square grains at deliberately inharmonic ratios |
+| `TRI` | **1.6 s – 4 s+** | a struck metal bar by modal synthesis — see below |
 | `CH` `OH` `TOM` `CLAP` `RIM` `FM` | | as the table above |
 | `SILENT` | | an unpopulated cartridge slot, or a deliberately dead track |
+
+**`TRI` is the one machine that is not an envelope times an oscillator.** It is six very high-Q
+resonators at the free-free bar ratios 1 : 2.76 : 5.40 : 8.93 : 13.34 : 18.64, struck with a
+1.5 ms noise burst. Those ratios are physics rather than taste: harmonic partials fuse into a
+pitched tone and stop sounding like metal, which is the same reason `GLITCH` picks inharmonic grain
+ratios. SNAP stretches them further apart, because a real triangle is a *bent* bar and its partials
+are messier than the ideal.
+
+Two consequences. It rings for **seconds** — at full DECAY the time constant is nearly four, so a
+hit is audible for the better part of twenty. That is what the instrument does, and it means a
+triangle track overlaps itself by design. And it is the only machine whose feedback path can in
+principle run away, so a test sweeps 81 points of its parameter space and asserts every one stays
+bounded, finite and non-growing. A 625-point sweep during development found none, with a worst
+peak of 0.71.
 
 **`GLITCH`'s SNAP is a chaos control, and it reaches both ends on purpose.** At zero the RNG seed
 resets on every trigger, so a hit is bit-identical each time and a pattern is reproducible. Above

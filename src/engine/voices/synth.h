@@ -946,4 +946,136 @@ class GlitchPerc : public VoiceBase
     int   grains_left_ = 0;
 };
 
+/// Triangle. A struck metal bar, by modal synthesis: a handful of very high-Q
+/// resonators at inharmonic ratios, excited by a short noise burst.
+///
+/// Modal rather than FM or filtered noise because a triangle is the case modal
+/// synthesis exists for. Its ring is a few discrete, long-lived, *inharmonic*
+/// partials — the defaults are the free-free bar ratios 1 : 2.76 : 5.40 : 8.93 :
+/// 13.34 : 18.64, which is physics rather than taste. Harmonic partials would
+/// fuse into a pitched tone and stop sounding like metal; that is the same
+/// reason GLITCH picks inharmonic grain ratios.
+///
+/// SNAP stretches those ratios further apart. Real triangles are bent bars
+/// rather than straight ones, so their partials are messier than the ideal, and
+/// stretching is what moves the sound from "tuned bar" toward "triangle".
+class Triangle : public VoiceBase
+{
+  public:
+    static constexpr int kModes = 6;
+
+    void Init(float sr) override
+    {
+        sr_ = sr;
+        noise_.Init();
+        strike_.Init(sr);
+        strike_.SetTime(daisysp::ADENV_SEG_ATTACK, 0.0002f);
+        strike_.SetTime(daisysp::ADENV_SEG_DECAY, 0.0015f);
+        strike_.SetCurve(kPercCurve);
+        strike_.SetMax(1.f);
+        strike_.SetMin(0.f);
+        for(int i = 0; i < kModes; ++i)
+            y1_[i] = y2_[i] = 0.f;
+        Recalculate();
+    }
+
+    void Trigger(float velocity) override
+    {
+        vel_     = velocity;
+        active_  = true;
+        left_    = hold_samples_;
+        strike_.Trigger();
+    }
+
+    float Process() override
+    {
+        if(!active_)
+            return 0.f;
+        // Resonators ring long after the strike, so the gate is a countdown of
+        // six time constants rather than an envelope test — cheaper than
+        // inspecting twelve state variables every sample.
+        if(--left_ <= 0)
+        {
+            active_ = false;
+            for(int i = 0; i < kModes; ++i)
+                y1_[i] = y2_[i] = 0.f;
+            return 0.f;
+        }
+
+        const float x = noise_.Process() * strike_.Process();
+
+        float sum = 0.f;
+        for(int i = 0; i < kModes; ++i)
+        {
+            const float y = x * gain_[i] + b1_[i] * y1_[i] - r2_[i] * y2_[i];
+            y2_[i]        = y1_[i];
+            y1_[i]        = y;
+            sum += y;
+        }
+        return Shape(sum * 0.25f * vel_);
+    }
+
+  protected:
+    void OnParam(ParamId id, float v) override
+    {
+        switch(id)
+        {
+            // Triangles live high. Below about 700 Hz it stops reading as one.
+            case ParamId::Tune: base_hz_ = 700.f + v * 3300.f; Recalculate(); break;
+            case ParamId::Decay: Recalculate(); break;
+            case ParamId::Tone:  bright_ = v; Recalculate(); break;
+            case ParamId::Snap:  stretch_ = v; Recalculate(); break;
+            default: break;
+        }
+    }
+
+  private:
+    /// Free-free bar modes. Not adjustable — they are what makes it metal.
+    static constexpr float kRatio[kModes]
+        = {1.f, 2.756f, 5.404f, 8.933f, 13.34f, 18.64f};
+
+    void Recalculate()
+    {
+        // Long: a triangle rings for seconds. Capped at four, because the pole
+        // radius for a longer decay stops being representable in a float with
+        // any precision left over.
+        const float tau = 0.08f + DecayTime(param(ParamId::Decay)) * 3.2f;
+        const float nyq = sr_ * 0.45f;
+
+        for(int i = 0; i < kModes; ++i)
+        {
+            // Stretching pushes the upper partials sharp, which is roughly what
+            // bending a bar into a triangle does to them.
+            const float ratio = kRatio[i] * (1.f + stretch_ * 0.12f * i);
+            float       f     = base_hz_ * ratio;
+            const bool  over  = f >= nyq;
+            if(over)
+                f = nyq;
+
+            // Upper modes decay faster — that is why a struck bar gets duller
+            // as it rings rather than just quieter.
+            const float t = tau / (1.f + static_cast<float>(i) * 0.6f);
+            const float r = expf(-1.f / (t * sr_));
+            const float w = 6.2831853f * f / sr_;
+
+            b1_[i] = 2.f * r * cosf(w);
+            r2_[i] = r * r;
+            // TONE tilts energy toward the upper partials. A folded-back mode
+            // is silenced rather than aliased down into the middle of the sound.
+            gain_[i] = over ? 0.f
+                            : (1.f - static_cast<float>(i) / kModes)
+                                  * (1.f + bright_ * static_cast<float>(i) * 0.5f);
+        }
+        hold_samples_ = static_cast<int32_t>(tau * 6.f * sr_);
+    }
+
+    daisysp::WhiteNoise noise_;
+    daisysp::AdEnv      strike_;
+    float               y1_[kModes] = {}, y2_[kModes] = {};
+    float               b1_[kModes] = {}, r2_[kModes] = {}, gain_[kModes] = {};
+    float   sr_ = 48000.f, base_hz_ = 1800.f, bright_ = 0.5f, stretch_ = 0.3f;
+    float   vel_ = 1.f;
+    int32_t left_ = 0, hold_samples_ = 0;
+};
+
 } // namespace drom

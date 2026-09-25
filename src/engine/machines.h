@@ -66,6 +66,7 @@ class MachineSlot
             case MachineId::RimShot:   voice_ = Make<drom::RimShot>();  break;
             case MachineId::FmPerc:    voice_ = Make<FmVoice>();        break;
             case MachineId::Glitch:    voice_ = Make<GlitchPerc>();     break;
+            case MachineId::Triangle:  voice_ = Make<drom::Triangle>(); break;
             default:                   voice_ = Make<EmptySlot>();      break;
         }
         id_ = id;

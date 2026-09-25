@@ -131,6 +131,7 @@ enum class MachineId : uint8_t
     Clap,
     RimShot,
     FmPerc,
+    Triangle,   ///< struck metal bar, modal
 
     Count
 };
@@ -148,7 +149,7 @@ inline constexpr MachineInfo kMachineInfo[static_cast<int>(MachineId::Count)] = 
     {"GLITCH",   "PERC"},
     {"CH",       "HAT"}, {"OH",      "HAT"},
     {"TOM",      "PERC"},{"CLAP",    "PERC"},
-    {"RIM",      "PERC"},{"FM",      "PERC"},
+    {"RIM",      "PERC"},{"FM",      "PERC"}, {"TRI", "PERC"},
 };
 
 inline const char *MachineName(MachineId id)
