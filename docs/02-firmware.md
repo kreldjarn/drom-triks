@@ -781,7 +781,8 @@ you do it from the wrong context.
 
 Full implementation — three simultaneous transports (DIN in/out/thru, USB device, optional USB
 host), a routing matrix that makes the machine a usable MIDI hub, the complete channel-voice and
-realtime message set, MIDI learn, and SysEx pattern backup.
+realtime message set, MIDI learn, and a SysEx protocol that covers both pattern backup and
+computer control.
 
 The part that interacts with this document is **clock recovery**: incoming clock is timestamped in
 the UART interrupt against the audio sample counter and fed through a PLL, so the sequencer runs

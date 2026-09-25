@@ -1,7 +1,7 @@
 # MIDI
 
 Full MIDI implementation: three simultaneous transports, a routing matrix, complete channel-voice
-and realtime message support, SysEx backup, MIDI learn, and a clock recovery scheme that doesn't
+and realtime message support, SysEx backup and control, MIDI learn, and a clock recovery scheme that doesn't
 smear the timing the [sequencer](02-firmware.md#3-timing-model) works so hard to keep tight.
 
 libDaisy does more of this than expected. `MidiEvent.h` already parses every channel-voice
@@ -120,7 +120,7 @@ with its origin port and refuse to emit it back there.
 | **Timing Clock** | Sync — see §6 |
 | **Start / Stop / Continue** | Transport. Start resets to step 1; Continue resumes in place |
 | **Song Position Pointer** | Jump to position. Essential for DAW scrubbing |
-| **SysEx** | Pattern/kit dump and load, config — see §8 |
+| **SysEx** | Pattern/kit dump, load and write; parameter and transport control — see §8 |
 | **Active Sensing** | Ignored, but must not choke the parser |
 | **System Reset** | Panic: all voices off, transport stop |
 
@@ -273,7 +273,8 @@ the settings page.
 
 ## 8. SysEx
 
-Backup and restore, which matters as soon as you've written patterns you'd be upset to lose.
+Two jobs, not one. **Backup and restore**, which matters as soon as you've written patterns you'd
+be upset to lose — and **control**, so the machine can be driven from a computer.
 
 Manufacturer ID **`0x7D`** — the non-commercial/educational ID, correct for a DIY instrument and
 guaranteed not to collide with real gear.
@@ -282,22 +283,135 @@ guaranteed not to collide with real gear.
 F0 7D <dev> <cmd> <data...> F7
 ```
 
+`<dev>` is a device id so several units can share a MIDI chain. `0x00` is the default; `0x7F` is
+broadcast and is only honoured for commands that cannot ambiguously reply.
+
+### 8.1 Librarian
+
 | cmd | Direction | Payload |
 | ---: | --- | --- |
-| `0x01` | request → | Pattern dump (pattern #) |
-| `0x02` | → reply | Pattern data |
-| `0x03` | request → | Kit dump (kit #) |
-| `0x04` | → reply | Kit data |
-| `0x05` | request → | Global settings dump |
-| `0x06` | → reply | Settings data |
-| `0x0F` | request → | Device inquiry: firmware version, build hash |
+| `0x01` | → request | Pattern dump — `<slot>` |
+| `0x02` | ← reply | Pattern data — `<slot> <encoded…>` |
+| `0x03` | → request | Kit dump — `<slot>` |
+| `0x04` | ← reply | Kit data — `<slot> <encoded…>` |
+| `0x05` | → request | Settings dump |
+| `0x06` | ← reply | Settings data — `<encoded…>` |
+| `0x07` | → write | Pattern into a slot — `<slot> <encoded…>` |
+| `0x08` | → write | Kit into a slot — `<slot> <encoded…>` |
+| `0x09` | → write | Settings — `<encoded…>` |
+| `0x0A` | ← reply | Ack/nak — `<cmd> <status>` |
+| `0x0F` | → request | Device inquiry |
+| `0x10` | ← reply | `<fw major> <fw minor> <patch version> <build hash ×5>` |
 
-Pattern data is ~9.2 kB, which must be **7-bit encoded** for SysEx (8 bytes → 7 bytes of payload,
-so ~10.5 kB on the wire). Chunk it and throttle: dumping a full 128-pattern bank at MIDI speed
-takes about 6 minutes over DIN, a few seconds over USB. Send the bank dump over USB only.
+The write commands are what the original table was missing: it could dump but not restore, which
+is half a librarian.
 
-Also respond to **Universal Device Inquiry** (`F0 7E 7F 06 01 F7`) — it's how software finds the
+**Every write is acked or nak'd** (`0x0A`). A silent write is indistinguishable from a lost cable.
+
+| status | Meaning |
+| ---: | --- |
+| `0x00` | ok |
+| `0x01` | bad slot |
+| `0x02` | version mismatch |
+| `0x03` | size mismatch |
+| `0x04` | bad encoding or truncated |
+| `0x05` | busy |
+
+### 8.2 Control
+
+These map one-to-one onto the `Command` structs the UI already emits
+([firmware §4](02-firmware.md#4-threading-model)), so they add no new surface on the audio side —
+the same routing, range-checking and single-writer ownership apply.
+
+| cmd | Payload |
+| ---: | --- |
+| `0x20` | Set track parameter — `<track> <param> <val14>` |
+| `0x21` | Set master FX parameter — `<fx id> <val14>` |
+| `0x22` | Set machine — `<track> <machine>` |
+| `0x23` | Toggle step — `<track> <step>` |
+| `0x24` | Set step lock — `<track> <step> <param> <val14>` |
+| `0x25` | Clear step locks — `<track> <step>` |
+| `0x26` | Set step field — `<track> <step> <field> <val14>` |
+| `0x27` | Set track mute — `<track> <0\|1>` |
+| `0x28` | Set tempo — `<bpm×10 as val14>` |
+| `0x29` | Transport — `<0 stop \| 1 start \| 2 continue>` |
+
+### 8.3 Query
+
+The dumps in §8.1 are the way to read a whole pattern. These exist for a host that wants to follow
+along without pulling 30 kB to find out one number.
+
+| cmd | Direction | Payload |
+| ---: | --- | --- |
+| `0x30` | → request | Track parameter — `<track> <param>` |
+| `0x31` | ← reply | `<track> <param> <val14>` |
+| `0x32` | → request | Transport state |
+| `0x33` | ← reply | `<playing> <bpm×10 val14> <position ×12>` |
+
+### 8.4 Value encoding
+
+**`val14` is two 7-bit bytes, MSB first**, spanning 0–16383 over the parameter's 0..1 range. That
+is the MIDI idiom, and 14 bits is comfortably finer than any knob resolves — `Ui::StepFor`'s
+finest step is 1/256.
+
+**Bulk payloads are 7-bit encoded**: seven data bytes become eight on the wire — one byte carrying
+the seven stripped high bits, then the seven stripped bytes. So payloads grow by **8/7**.
+
+### 8.5 Reject, never reinterpret
+
+Every bulk payload carries the same `SaveHeader` — magic, version, `payload_size` — that flash
+saves carry, and it is checked on exactly the same terms
+([firmware §8](02-firmware.md#8-persistence)). A host sending a v3 pattern to a v4 device gets a
+`0x02` nak, not a reinterpreted struct. The failure this prevents *sounds like corruption* rather
+than like a mismatch, which is precisely why it cannot be left to chance on the wire either.
+
+### 8.6 Size and timing
+
+Derived from `sizeof`, not estimated:
+
+| | Raw | On the wire (×8/7) | Over DIN @ 3,125 B/s |
+| --- | ---: | ---: | ---: |
+| One pattern (`Patch`) | 30.1 kB | 34.5 kB | **11.3 s** |
+| One kit | 1.6 kB | 1.8 kB | 0.6 s |
+| A 128-pattern bank | 3.77 MB | 4.31 MB | **~24 minutes** |
+
+**Send bulk dumps over USB only.** Twenty-four minutes is not a backup, it is an outage — and the
+same transfer over USB MIDI is seconds. Chunk large payloads and throttle: a single 34 kB SysEx
+message is legal but many hosts handle a sequence of ~1 kB frames far more gracefully, and chunking
+is what lets a librarian show a progress bar.
+
+> An earlier revision of this section said a pattern was ~9.2 kB and a bank took about six minutes.
+> Both were right when `Step` was 22 bytes across 8 tracks. `Step` is now 38 bytes across 12, and
+> the `Kit` carries master FX and a machine per track — see
+> [firmware §6](02-firmware.md#6-sequencer-data-model).
+
+### 8.7 Two implementation rules
+
+**Parse in the main loop, never in the MIDI interrupt.** The command queue is
+single-producer/single-consumer and [firmware §4](02-firmware.md#4-threading-model) is explicit
+that the ISR never pushes commands. A SysEx parser in the UART interrupt makes it two-producer,
+which does not crash — it corrupts a pattern occasionally. Clock timestamping stays in the ISR
+because it feeds the PLL, not the queue.
+
+**Decode bulk loads straight into `Storage::staging()`.** It is already a static `Patch`-sized
+buffer, and `Machine::RequestLoad` already exists to hand it to the audio side at a block boundary.
+A SysEx pattern load and a flash pattern load then become the same operation, and the protocol
+costs no additional RAM.
+
+### 8.8 Host side
+
+Also respond to **Universal Device Inquiry** (`F0 7E 7F 06 01 F7`) — it is how software finds the
 device.
+
+Everything above is deliberately a **binary protocol on a class-compliant USB MIDI device**, which
+means no driver on any platform and several clients for one piece of firmware work: a patch
+librarian, a DAW script, a CI harness driving real hardware, a browser editor over WebMIDI, and an
+MCP server for driving the machine from an LLM.
+
+**None of those belong on the MCU.** MCP in particular is JSON-RPC and wants a parser and an
+allocator, against the rule that the audio side never allocates — and it is a host-side protocol by
+design. The bridge is a couple of hundred lines of Python or TypeScript over `mido` or `node-midi`,
+living beside the firmware rather than inside it.
 
 ## 9. Implementation notes
 
