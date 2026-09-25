@@ -395,6 +395,9 @@ void Draw(uint32_t now_ms)
         std::printf("%-*s", kCellCols, kTrackName[i]);
 
     // Macro encoders, with the selected one marked.
+    std::printf("\n  swing    \033[1m%3u\033[0m \033[2m(%s, i/o to change; 50 straight)\033[0m",
+                g_machine.patch().pattern.tracks[g_ui.selected_track()].swing,
+                kTrackName[g_ui.selected_track()]);
     std::printf("\n  machine  \033[1m%-10s\033[0m \033[2m%s on %s - n/N to change\033[0m",
                 MachineName(g_machine.machine(g_ui.selected_track())),
                 kMachineInfo[static_cast<int>(
@@ -437,7 +440,7 @@ void Draw(uint32_t now_ms)
                 "enter default  p page\n"
                 "  s shift (master FX)  l lock a step  b pattern  t tap  "
                 "[ ] tempo\n"
-                "  m mute mode  r record  n N machine  esc quit\033[0m\n");
+                "  m mute mode  r record  n N machine  i o swing  esc quit\033[0m\n");
     std::fflush(stdout);
 }
 
@@ -606,6 +609,23 @@ int main(int argc, char **argv)
                         g_ui.TransportRelease(Ui::Key::Patt);
                     break;
                 case 't': g_ui.TransportPress(Ui::Key::Tap); break;
+                case 'i':
+                case 'o':
+                {
+                    // Per track, like length and speed. A swung hat over a
+                    // straight kick is the reason it is not on the pattern.
+                    const int t = g_ui.selected_track();
+                    int sw = g_machine.patch().pattern.tracks[t].swing
+                             + (ch == 'o' ? 1 : -1);
+                    if(sw < kSwingStraight) sw = kSwingStraight;
+                    if(sw > kSwingMax) sw = kSwingMax;
+                    Command sc;
+                    sc.type  = Command::Type::SetSwing;
+                    sc.track = static_cast<uint8_t>(t);
+                    sc.value = static_cast<float>(sw);
+                    g_machine.Push(sc);
+                    break;
+                }
                 case 'n':
                 case 'N':
                 {

@@ -462,8 +462,8 @@ struct Step {
     ParamLock locks[8];
 };                                              // 38 bytes
 
-struct Track  { Step steps[64]; uint8_t length; uint8_t speed; uint8_t direction; };
-struct Pattern{ Track tracks[12]; uint16_t bpm_x10; uint8_t swing; uint8_t kit_id; };
+struct Track  { Step steps[64]; uint8_t length, swing, speed, direction; };
+struct Pattern{ Track tracks[12]; uint16_t bpm_x10; uint8_t kit_id; };
 ```
 
 **28.6 kB per pattern** at 12 tracks — measured from `sizeof`, not estimated. `ParamLock` aligns to
@@ -504,6 +504,10 @@ Per-track `length` and `speed` give polymeter for free: a 7-step hat track again
 kick is one byte of state and the single highest ratio of musical interest to implementation
 effort in the whole sequencer.
 
+**Swing is per track for the same reason**, and moved off the pattern to get there. A swung hat
+over a straight kick is the groove technique; a pattern-wide swing control cannot express it.
+50 is straight, 75 pushes odd steps a quarter step late, and the range is capped there.
+
 **Micro-timing is capped at ±23 ticks — just under one step.** At 24 ticks per 16th that's
 ±(23/24) of a step at 1/24-step resolution, about ±5 ms per tick at 120 BPM. Going further
 breaks the data model's meaning: a step pushed a full step late is indistinguishable from the
@@ -513,6 +517,14 @@ Because a step can move up to a step either way, the tick handler cannot assume 
 step*. It checks the neighbouring positions too — and must de-duplicate, since on a 1- or
 2-step cycle that window wraps onto itself and would otherwise evaluate the same step (and roll
 its probability) up to three times per tick.
+
+**`micro` is clamped to the track's own step length at use, and that is load-bearing.** "±23 ticks,
+just under a step" is only true while a step *is* 24 ticks. A track at double speed has 12 and at
+quadruple speed 6, so the stored value reaches two positions and then four — past the ±1 window
+that finds a displaced step, which then never finds it. Measured before the clamp: a speed-1 track
+at maximum micro and swing played **4 of its 8 steps**, and a speed-2 track at maximum micro played
+**none at all**. It is a silent failure at the intersection of three unrelated settings, it predates
+swing, and a test now sweeps all three speeds for it.
 
 **Parameter locks** are the feature worth building the data model around. Hold a step key, turn
 a knob, and that knob's value is recorded for that step only. Eight lock slots per step, because

@@ -31,6 +31,7 @@ struct Command
         ClearStepLocks,///< track, step
         SetTrackMute,  ///< track, value != 0
         SetTempo,      ///< value = BPM
+        SetSwing,      ///< track, value = 50..75 absolute, like SetTempo
         Start,
         Stop,
         Continue,

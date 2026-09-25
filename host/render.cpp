@@ -86,7 +86,8 @@ Pattern BuildPattern()
 {
     Pattern p;
     p.bpm_x10 = static_cast<uint16_t>(kBpm * 10.f);
-    p.swing   = 50;
+    for(auto &tr : p.tracks)
+        tr.swing = kSwingStraight;
 
     for(auto &t : p.tracks)
     {

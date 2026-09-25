@@ -292,6 +292,17 @@ class Machine
                     patch_.pattern.tracks[t].steps[c.step].lock_count = 0;
                 break;
 
+            case Command::Type::SetSwing:
+            {
+                // Absolute rather than normalised, like tempo: 50 is straight
+                // and the number means something on its own.
+                int s = static_cast<int>(c.value + 0.5f);
+                if(s < kSwingStraight) s = kSwingStraight;
+                if(s > kSwingMax) s = kSwingMax;
+                patch_.pattern.tracks[t].swing = static_cast<uint8_t>(s);
+                break;
+            }
+
             case Command::Type::SetTrackMute:
                 patch_.pattern.tracks[t].muted = c.value != 0.f;
                 break;

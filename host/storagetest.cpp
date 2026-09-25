@@ -45,7 +45,7 @@ void MakePatch(Patch &p, uint8_t tag)
 {
     InitPatch(p);
     p.pattern.bpm_x10 = static_cast<uint16_t>(1000 + tag);
-    p.pattern.swing   = tag;
+    p.pattern.tracks[0].swing = kSwingStraight + (tag % 26);
     for(int t = 0; t < kNumTracks; ++t)
         for(int s = 0; s < kMaxSteps; ++s)
         {

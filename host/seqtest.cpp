@@ -42,10 +42,10 @@ Pattern MakePattern()
 {
     Pattern p;
     p.bpm_x10 = 1200; // 120 BPM -> 250 samples/tick, 6000 samples per 16th
-    p.swing   = 50;
     for(auto &t : p.tracks)
     {
         t.length = 16;
+        t.swing  = kSwingStraight;
         t.muted  = true;
     }
     return p;
@@ -98,7 +98,7 @@ int main()
     std::printf("\nswing (delays odd steps only):\n");
     {
         Pattern p = MakePattern();
-        p.swing   = 75;
+        p.tracks[0].swing = 75;
         p.tracks[0].muted = false;
         for(int i = 0; i < 4; ++i)
             p.tracks[0].steps[i].flags = kStepActive;
@@ -117,6 +117,84 @@ int main()
             std::snprintf(label, sizeof(label), "step %d %s", i, (i & 1) ? "(odd, swung)" : "(even, straight)");
             Check(std::fabs(h[i].second - want) <= 1.0, label,
                   static_cast<double>(h[i].second), want, 1.0);
+        }
+    }
+
+    // Swing is per track: a swung hat over a straight kick is the whole reason
+    // it does not live on the pattern.
+    {
+        Pattern p = MakePattern();
+        p.tracks[0].swing = kSwingStraight; // straight
+        p.tracks[1].swing = 75;             // swung
+        p.tracks[0].muted = p.tracks[1].muted = false;
+        for(int i = 0; i < 4; ++i)
+            p.tracks[0].steps[i].flags = p.tracks[1].steps[i].flags = kStepActive;
+
+        Sequencer s;
+        s.Init(kSr);
+        s.SetPattern(&p);
+        s.Start();
+
+        // Collect step 1 (the first odd step) for each track separately.
+        double t0 = -1, t1 = -1;
+        int64_t now = 0;
+        Sequencer::Event ev[32];
+        for(int b = 0; b < 400; ++b)
+        {
+            const size_t n = s.Process(32, ev, 32);
+            for(size_t i = 0; i < n; ++i)
+            {
+                const double at = static_cast<double>(now + ev[i].offset);
+                if(ev[i].track == 0 && at > sstep * 0.5 && at < sstep * 1.5 && t0 < 0) t0 = at;
+                if(ev[i].track == 1 && at > sstep * 0.5 && at < sstep * 1.5 && t1 < 0) t1 = at;
+            }
+            now += 32;
+        }
+        const double swing_off = (75 - 50) * kTicksPerStep / 100 * spt;
+        Check(std::fabs(t0 - sstep) <= 1.0, "track 0 step 1 lands straight", t0, sstep, 1.0);
+        Check(std::fabs(t1 - (sstep + swing_off)) <= 1.0,
+              "track 1 step 1 is swung, on the same pattern", t1, sstep + swing_off, 1.0);
+    }
+
+    // Micro is stored in ticks and capped at +/-23, which is "just under a step"
+    // only while a step is 24 ticks. A track at double speed has 12 and at
+    // quadruple speed 6, so the stored value can reach several positions — and
+    // the tick window that finds a displaced step is only +/-1 wide.
+    //
+    // Unclamped this is not a rounding error: measured over a fixed span, a
+    // speed-1 track at max micro and max swing played 4 of its 8 steps, and a
+    // speed-2 track at max micro played **none at all**. It predates swing.
+    std::printf("\na fast track with a big micro offset still plays:\n");
+    {
+        auto HitsAt = [](int8_t speed, int8_t micro, uint8_t swing) {
+            static Pattern p;
+            p = Pattern{};
+            p.bpm_x10 = 1200;
+            for(auto &tr : p.tracks) { tr.length = 16; tr.muted = true; }
+            Track &tr = p.tracks[0];
+            tr.muted = false; tr.speed = speed; tr.swing = swing;
+            for(int i = 0; i < 16; ++i)
+            {
+                tr.steps[i].flags = kStepActive;
+                tr.steps[i].micro = micro;
+            }
+            static Sequencer s;
+            s.Init(kSr); s.SetPattern(&p); s.Start();
+            Sequencer::Event ev[64];
+            int n = 0;
+            for(int b = 0; b < 2000; ++b) n += (int)s.Process(32, ev, 64);
+            return n;
+        };
+
+        for(int8_t sp = 0; sp <= 2; ++sp)
+        {
+            const int plain   = HitsAt(sp, 0, kSwingStraight);
+            const int nudged  = HitsAt(sp, kMicroRange, kSwingMax);
+            char label[80];
+            std::snprintf(label, sizeof(label),
+                          "speed %d: max micro + max swing loses no steps", sp);
+            Check(nudged == plain, label, static_cast<double>(nudged),
+                  static_cast<double>(plain), 0.0);
         }
     }
 

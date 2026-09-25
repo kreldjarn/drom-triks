@@ -77,10 +77,22 @@ enum class Direction : uint8_t
     Random,
 };
 
+/// Swing is per track, not per pattern, for the same reason length and speed
+/// are: swung hats over a straight kick is the groove technique, and it costs
+/// one byte a track. 50 is straight; 75 pushes odd steps a quarter of a step
+/// late, which is about where classic MPC shuffle sits.
+///
+/// Capped at 75 deliberately. The tick window that finds a displaced step is
+/// finite, and swing stacks on top of a micro offset that can already be almost
+/// a whole step — see the window note in sequencer.h.
+inline constexpr uint8_t kSwingStraight = 50;
+inline constexpr uint8_t kSwingMax      = 75;
+
 struct Track
 {
     Step      steps[kMaxSteps];
     uint8_t   length    = 16;
+    uint8_t   swing     = kSwingStraight;
     /// Powers of two relative to 16ths: 0 = 1x, +1 = double time, -1 = half.
     int8_t    speed     = 0;
     Direction direction = Direction::Forward;
@@ -107,7 +119,6 @@ struct Pattern
 {
     Track    tracks[kNumTracks];
     uint16_t bpm_x10 = 1200;
-    uint8_t  swing   = 50; ///< 50 = straight; above that delays odd steps
     uint8_t  kit_id  = 0;
 };
 

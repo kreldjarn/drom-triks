@@ -54,6 +54,9 @@ inline constexpr uint32_t kPatchMagic = 0x4D4F5244; // 'DROM'
 /// exactly the failure SaveHeader exists to catch. `payload_size` alone would
 /// have caught this one, but only because the size happened to change.
 ///
+/// Bumped to 5 when swing moved from the pattern to the track, so a swung hat
+/// can sit over a straight kick. Still before Phase 6, so still free.
+///
 /// Bumped to 4 when each track gained a selectable machine. Still before
 /// Phase 6, so still free — which is the rule the freeze actually states.
 ///
@@ -63,7 +66,7 @@ inline constexpr uint32_t kPatchMagic = 0x4D4F5244; // 'DROM'
 /// such change invalidates every stored pattern. Anything that alters
 /// sizeof(Patch) belongs on this side of that line — see
 /// docs/02-firmware.md §6.
-inline constexpr uint16_t kPatchVersion = 4;
+inline constexpr uint16_t kPatchVersion = 5;
 
 /// Guards a saved struct against being read by a different firmware version.
 ///

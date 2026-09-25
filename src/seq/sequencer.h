@@ -178,13 +178,15 @@ class Sequencer
         }
     }
 
-    /// Swing delays odd positions. 50 is straight; 75 pushes them a quarter of
-    /// a step late, which is about where classic MPC shuffle sits.
-    int SwingTicks(int pos, int ticks_per_step) const
+    /// Swing delays odd positions, per track. 50 is straight; 75 pushes them a
+    /// quarter of a step late, which is about where classic MPC shuffle sits.
+    static int SwingTicks(const Track &tr, int pos, int ticks_per_step)
     {
         if((pos & 1) == 0)
             return 0;
-        const int amount = static_cast<int>(pattern_->swing) - 50;
+        int amount = static_cast<int>(tr.swing) - kSwingStraight;
+        if(amount < 0) amount = 0;
+        if(amount > kSwingMax - kSwingStraight) amount = kSwingMax - kSwingStraight;
         return amount * ticks_per_step / 100;
     }
 
@@ -230,7 +232,18 @@ class Sequencer
                 const int idx = StepForPosition(tr, pos);
                 const Step &st = tr.steps[idx];
 
-                int fire = pos * tps + st.micro + SwingTicks(pos, tps);
+                // Micro is stored in ticks and capped at +/-23 — "just under a
+                // step" only while a step *is* 24 ticks. A track at double
+                // speed has 12, so the stored value can reach two positions and
+                // at quadruple speed nearly four. Clamp to this track's own
+                // step, which is what the cap always meant, and which keeps
+                // micro plus swing inside one position so the +/-1 window above
+                // is sufficient. Without it a fast track silently drops steps.
+                int micro = st.micro;
+                if(micro > tps - 1) micro = tps - 1;
+                if(micro < -(tps - 1)) micro = -(tps - 1);
+
+                int fire = pos * tps + micro + SwingTicks(tr, pos, tps);
                 fire     = ((fire % loop_ticks) + loop_ticks) % loop_ticks;
                 if(fire != local)
                     continue;

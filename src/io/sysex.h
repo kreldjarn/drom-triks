@@ -40,7 +40,7 @@ enum class SysExCmd : uint8_t
     SetTrackParam = 0x20, SetFxParam     = 0x21, SetMachine   = 0x22,
     ToggleStep    = 0x23, SetStepLock    = 0x24, ClearLocks   = 0x25,
     SetStepField  = 0x26, SetTrackMute   = 0x27, SetTempo     = 0x28,
-    Transport     = 0x29,
+    Transport     = 0x29, SetSwing       = 0x2A,
 
     // query
     QueryParamReq = 0x30, QueryParamReply = 0x31,
@@ -267,6 +267,14 @@ class SysExParser
                 if(bpm < 20.f || bpm > 300.f) return Bad(r, SysExStatus::BadSize);
                 return Cmd(r, Command::Type::SetTempo, 0, 0, 0, bpm);
             }
+
+            case SysExCmd::SetSwing:
+                if(n < 2) return Bad(r, SysExStatus::BadSize);
+                if(d[0] >= kNumTracks) return Bad(r, SysExStatus::BadSlot);
+                if(d[1] < kSwingStraight || d[1] > kSwingMax)
+                    return Bad(r, SysExStatus::BadSize);
+                return Cmd(r, Command::Type::SetSwing, d[0], 0, 0,
+                           static_cast<float>(d[1]));
 
             case SysExCmd::Transport:
                 if(n < 1) return Bad(r, SysExStatus::BadSize);

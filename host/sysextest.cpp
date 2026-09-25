@@ -138,6 +138,16 @@ int main()
         Check(g_p.Parse(g_msg, n).command.type == Command::Type::Continue,
               "transport 2 continues");
 
+        n = Frame(g_msg, 0, SysExCmd::SetSwing, {4, 66});
+        r = g_p.Parse(g_msg, n);
+        Check(r.command.type == Command::Type::SetSwing && r.command.track == 4
+                  && std::fabs(r.command.value - 66.f) < 1e-3f,
+              "swing is per track and carried absolute");
+
+        n = Frame(g_msg, 0, SysExCmd::SetSwing, {0, 90});
+        Check(g_p.Parse(g_msg, n).kind == SysExResult::Kind::Error,
+              "and a swing past the cap is refused rather than clamped silently");
+
         // Tempo is absolute, not normalised: 128.5 BPM must survive exactly.
         const uint16_t t = 1285;
         n = Frame(g_msg, 0, SysExCmd::SetTempo,
