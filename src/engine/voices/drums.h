@@ -1,8 +1,12 @@
 #pragma once
 #include "daisysp.h"
+#include "../dsp/drum_models.h"
 #include "../voice.h"
 
-// The four voices DaisySP covers directly. These are mostly parameter mapping:
+// The four voices DaisySP covers directly, through the forks in dsp/ — the
+// same models with their per-sample coefficient maths hoisted, bit-identical
+// apart from the bass drum (docs/02-firmware.md §10). These are mostly
+// parameter mapping:
 // the macro knobs are normalised 0..1 and each voice maps them onto its own
 // ranges, chosen so the same knob does a musically similar thing everywhere.
 
@@ -10,7 +14,7 @@ namespace drom {
 
 /// 808-style bass drum. SNAP drives the FM amount, which is what gives the
 /// click/punch at the attack rather than a louder body.
-class BassDrum : public VoiceBase
+class BassDrum : public BlockVoice<BassDrum>
 {
   public:
     void Init(float sr) override { d_.Init(sr); }
@@ -45,7 +49,7 @@ class BassDrum : public VoiceBase
     }
 
   private:
-    daisysp::AnalogBassDrum d_;
+    dsp::AnalogBassDrum     d_;
     bool                    pending_ = false;
 };
 
@@ -62,7 +66,7 @@ class BassDrum : public VoiceBase
 /// which is what the knob is supposed to do. If the analog model is ever
 /// wanted for its character, it needs an amplitude envelope wrapped around it
 /// to make DECAY authoritative — the model will not do it alone.
-class SnareDrum : public VoiceBase
+class SnareDrum : public BlockVoice<SnareDrum>
 {
   public:
     void Init(float sr) override { d_.Init(sr); }
@@ -96,7 +100,7 @@ class SnareDrum : public VoiceBase
     }
 
   private:
-    daisysp::SyntheticSnareDrum d_;
+    dsp::SyntheticSnareDrum<>   d_;
     bool                        pending_ = false;
 };
 
@@ -104,7 +108,7 @@ class SnareDrum : public VoiceBase
 /// code. CH uses the cheaper square-noise/linear-VCA pair; OH uses ring-mod
 /// noise and the cymbal VCA, which rings longer and sounds less synthetic.
 template <typename Noise, typename VCA>
-class HiHatVoice : public VoiceBase
+class HiHatVoice : public BlockVoice<HiHatVoice<Noise, VCA>>
 {
   public:
     void Init(float sr) override { d_.Init(sr); }
@@ -119,7 +123,7 @@ class HiHatVoice : public VoiceBase
     {
         const float s = d_.Process(pending_);
         pending_      = false;
-        return Shape(s);
+        return this->Shape(s);
     }
 
   protected:
@@ -127,7 +131,7 @@ class HiHatVoice : public VoiceBase
     {
         switch(id)
         {
-            case ParamId::Tune: d_.SetFreq((3000.f + v * 9000.f) * PitchMul()); break;
+            case ParamId::Tune: d_.SetFreq((3000.f + v * 9000.f) * this->PitchMul()); break;
             case ParamId::Decay: d_.SetDecay(v); break;
             case ParamId::Tone: d_.SetTone(v); break;
             case ParamId::Snap: d_.SetNoisiness(v); break;
@@ -136,11 +140,11 @@ class HiHatVoice : public VoiceBase
     }
 
   private:
-    daisysp::HiHat<Noise, VCA> d_;
+    dsp::HiHat<Noise, VCA>     d_;
     bool                       pending_ = false;
 };
 
-using ClosedHat = HiHatVoice<daisysp::SquareNoise, daisysp::LinearVCA>;
-using OpenHat   = HiHatVoice<daisysp::RingModNoise, daisysp::SwingVCA>;
+using ClosedHat = HiHatVoice<dsp::SquareNoise, daisysp::LinearVCA>;
+using OpenHat   = HiHatVoice<dsp::RingModNoise, daisysp::SwingVCA>;
 
 } // namespace drom

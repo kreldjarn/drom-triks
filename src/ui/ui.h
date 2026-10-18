@@ -76,6 +76,7 @@ class Ui
         selected_track_ = 0;
         held_step_      = -1;
         shift_          = false;
+        keyboard_       = false;
         for(int i = 0; i < kNumMacros; ++i)
         {
             edit_value_[i]   = 0.f;
@@ -91,7 +92,14 @@ class Ui
 
     void SetShift(bool held) { shift_ = held; }
 
-    void SetMode(Mode m) { mode_ = m; }
+    /// Setting Play or Keyboard also sets what the held modes return to, so
+    /// this cannot leave the two disagreeing.
+    void SetMode(Mode m)
+    {
+        if(m == Mode::Play || m == Mode::Keyboard)
+            keyboard_ = m == Mode::Keyboard;
+        mode_ = m;
+    }
 
     /// Select which page the eight macro encoders address.
     ///
@@ -165,7 +173,7 @@ class Ui
             // Releasing SHIFT changes what every macro points at, exactly like
             // a page change, so any gesture in flight has to re-seed.
             case Key::Shift: shift_ = false; EndGestures(); break;
-            case Key::Patt:  if(mode_ == Mode::Pattern) mode_ = Mode::Play; break;
+            case Key::Patt:  if(mode_ == Mode::Pattern) mode_ = BaseMode(); break;
             default: break;
         }
     }
@@ -178,15 +186,22 @@ class Ui
     /// NOTE lock on the cursor step, turns that step on, and advances — step
     /// entry, which is far quicker for a line than holding each step and
     /// turning a knob.
+    ///
+    /// Keyboard is the base mode the held modes (MUTE, PATTERN) return to, so
+    /// it is remembered separately from `mode_`. Switching it while one of
+    /// those is held takes effect on release rather than cancelling the hold.
     void SetKeyboard(bool on)
     {
-        const bool was = mode_ == Mode::Keyboard;
-        if(on == was)
+        if(on == keyboard_)
             return;
-        mode_      = on ? Mode::Keyboard : Mode::Play;
+        keyboard_ = on;
+        if(mode_ == Mode::Play || mode_ == Mode::Keyboard)
+            mode_ = BaseMode();
         kb_cursor_ = 0;
         EndGestures();
     }
+
+    bool keyboard() const { return keyboard_; }
 
     /// Octaves from the track's own pitch. Sixteen keys span fifteen semitones,
     /// so the window moves rather than stretching.
@@ -204,7 +219,7 @@ class Ui
     /// Set or clear MUTE. Held, like PATTERN.
     void SetMuteHeld(bool held)
     {
-        mode_ = held ? Mode::Mute : (mode_ == Mode::Mute ? Mode::Play : mode_);
+        mode_ = held ? Mode::Mute : (mode_ == Mode::Mute ? BaseMode() : mode_);
     }
 
     /// The two navigation encoders. 0 is value/tempo, 1 is page.
@@ -388,6 +403,23 @@ class Ui
         Emit(enc, tgt, Clampf(v, 0.f, 1.f));
     }
 
+    /// Set whatever macro `enc` addresses to an absolute value, through the
+    /// same layers and commands as a turn: a held step still gets a lock,
+    /// SHIFT still reaches master FX.
+    ///
+    /// For a control that has a position — the dev kit's pots. Deciding *when*
+    /// a position should be written (pickup, jump, noise rejection) belongs to
+    /// the caller, which is the only thing that knows the control is a pot.
+    void MacroSet(int enc, float v)
+    {
+        if(enc < 0 || enc >= kNumMacros || !machine_)
+            return;
+        const Target tgt = TargetFor(enc);
+        if(tgt.kind == Target::Kind::None)
+            return;
+        Emit(enc, tgt, Clampf(v, 0.f, 1.f));
+    }
+
     /// What a macro encoder is pointing at right now.
     ///
     /// Three layers, resolved in this order:
@@ -490,6 +522,10 @@ class Ui
         for(int i = 0; i < kNumMacros; ++i)
             turning_[i] = false;
     }
+
+    /// Where a held mode returns to on release. Without this, holding MUTE in
+    /// keyboard mode would drop you back to step entry when you let go.
+    Mode BaseMode() const { return keyboard_ ? Mode::Keyboard : Mode::Play; }
 
     /// A quantised parameter wants one detent per value, not per 1/256 — and no
     /// acceleration, because there is nothing between the values to accelerate
@@ -715,6 +751,7 @@ class Ui
     bool   shift_          = false;
     bool   wrote_lock_while_held_ = false;
     bool   rec_armed_      = false;
+    bool   keyboard_       = false;
     int    fx_bank_        = 0;
     int    kb_octave_      = 0;
     int    kb_cursor_      = 0;

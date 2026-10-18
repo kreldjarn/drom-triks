@@ -242,10 +242,12 @@ sample as the gate, so a bus too slow for the audio callback pushes every parame
 behind its own trigger. [Doc 05 §4.2](05-analog-expansion.md#42-why-the-bus-choice-decides-whether-p-locks-work)
 has the full argument.
 
-All twelve machines are statically allocated. `Machine` is now **46.2 kB** — the patch at 30.1 kB
+All twelve machines are statically allocated. `Machine` is now **50.1 kB** on the ARM build — the patch at 30.9 kB
 plus twelve 1 kB machine slots, the voice slots, the channel strips and the queue. With
-`Storage`'s staging buffer that is roughly 76 kB of the 128 kB DTCM, so the rule that neither is
-ever a stack local matters more than it did at 21.5 kB, not less.
+`Storage`'s staging buffer and a load buffer that would be ~112 kB of the 128 kB DTCM before
+the board class (39 kB) is counted — which is why the dev kit build moves both flash buffers to
+SDRAM (§10). The rule that none of these is ever a stack local matters more than it did at
+21.5 kB, not less.
 
 ### Percussive FM
 
@@ -372,26 +374,19 @@ the design to the Seed3 permanently and contradict
 [production §5](11-production.md#5-the-module-question). Sends plus pan give the same stereo spread
 for four bytes of state per voice, and it is what Elektron do.
 
-**What is actually implemented** (`src/engine/fx.h`): the delay is ours, because DaisySP has no
-stereo cross-feed delay and because the buffer has to be caller-provided. The reverb and compressor
-are DaisySP's `ReverbSc` and `Compressor`, which live in **DaisySP-LGPL** — a separate library under
-LGPL-2.1, where DaisySP proper is MIT. `MasterFx` is the seam, so replacing either is one file.
+**What is actually implemented** (`src/engine/fx.h`): the delay and the reverb are ours. The delay is
+because DaisySP has no stereo cross-feed delay; the reverb is a Dattorro plate (`src/engine/reverb.h`,
+[§10](#the-reverb-a-dattorro-plate)) that replaced DaisySP's `ReverbSc`. Both take caller-provided
+buffers, so where they live is a board decision. The compressor is still DaisySP's `Compressor`,
+from **DaisySP-LGPL** — a separate library under LGPL-2.1, where DaisySP proper is MIT. `MasterFx` is
+the seam, so replacing it is one file. **Licensing bites on distribution, not development.**
+Prototypes carry no obligation. Shipping units means the licence text, an acknowledgement, and —
+since this is a static link — an offer of object files so a user can relink. It does **not** require
+opening our firmware; that is GPL. Recorded as a ship-time item in
+[production §3](11-production.md#3-three-things-to-build-into-v1-firmware).
 
-Two consequences:
-
-- **Licensing bites on distribution, not development.** Prototypes carry no obligation. Shipping
-  units means the licence text, an acknowledgement, and — since this is a static link — an offer of
-  object files so a user can relink. It does **not** require opening our firmware; that is GPL.
-  Recorded as a ship-time item in [production §3](11-production.md#3-three-things-to-build-into-v1-firmware).
-- **`ReverbSc` is `float aux_[98936]`, 395 kB, held by value.** It cannot be a member of `Machine`
-  (§2's 21.5 kB rule), so it is injected by pointer, and on the Seed3 it has to live in SDRAM. That,
-  not the licence, is what would force writing our own: a board without SDRAM cannot host it, and
-  the replacement is a Freeverb-shaped plate of about 50 kB.
-
-The delay buffer is caller-provided for the same reason. Under `BOOT_SRAM` the staged app image
-occupies the 480 kB AXI SRAM, leaving only the 128 kB DTCM and a 32 kB `.sram1_bss` for statics —
-so on the Seed3 both buffers want SDRAM. Keeping them out of the engine means that is a board
-decision rather than an engine one.
+The delay's ~768 kB only fits SDRAM on the Seed3. The reverb's ~165 kB lives in AXI SRAM through a
+linker section of our own ([§10](#the-reverb-a-dattorro-plate)).
 
 **Per-voice digital FX only reaches tracks 1–8.** `AnalogVoice::Process` returns zero — cartridge
 audio comes back through the ADC — so filters, saturation and compression on tracks 9–12 depend on
@@ -869,3 +864,203 @@ would import the source's jitter — up to 1 ms from a USB source, which is quan
 and throw away the sample-accurate timing of §3.
 
 See **[06-midi.md](06-midi.md)** for the full specification.
+
+## 10. The Desktop Dev Kit
+
+Until the panel exists, the firmware runs on Electrosmith's **Seed3 Desktop Dev Kit**: 16 keys in
+two rows of 8 with one single-colour LED each, 8 pots, a 2-way toggle (SW17) and a 3-way toggle
+(SW18), plus CV, gate and DIN MIDI that are not used yet. Board support is libDaisy's
+`daisy::desktop_devkit::Hardware`, new in **libDaisy v9.0.0** — which is why the submodule is
+pinned there.
+
+`src/ui/devkit_panel.h` folds the panel's 34 keys and 10 encoders onto that. It is pure logic
+like `Ui`, adds no behaviour of its own (every gesture ends in a call the panel would make), and is
+tested by `host/devkittest.cpp`. `src/main.cpp` is only the wiring.
+
+| Control | Does |
+| --- | --- |
+| **SW18 up** — STEPS | 16 keys are steps. Hold a step + pot = p-lock. In keyboard mode, a keyboard |
+| **SW18 centre** — TRACKS | top row: tracks 1–8; bottom row: tracks 9–12, then PLAY · PAGE · MUTE · KBD |
+| **SW18 down** — PATTERNS | 16 keys are slots 1–16: press loads, with SHIFT saves |
+| **SW17** | SHIFT |
+| **Pots 1–8** | the eight macros, through `Ui::MacroSet` — the page, or master FX / step detail under SHIFT |
+
+| TRACKS key | Alone | With SHIFT |
+| --- | --- | --- |
+| track | select | next machine on that track (dev kit only, see below) |
+| PLAY | start / stop | tap tempo |
+| PAGE | tap: next page, wrapping. Hold + key 1–4: that page | the master-FX bank instead |
+| MUTE | held: track keys mute | — |
+| KBD | keyboard on / off | REC arm |
+
+The decisions behind it, so they are not re-litigated:
+
+- **SHIFT is a toggle, not a held key.** `Ui` prefers held modifiers because they cannot get stuck,
+  but a toggle cannot get stuck *invisibly* — its lever shows where it is. It also leaves all 16 keys
+  for steps, which is the only way SHIFT + hold a step (step detail) stays reachable.
+- **SW18 selects what the keys are.** Steps need all 16 keys, so tracks and transport need a
+  second layer, and a lever is a layer you can see. The PATTERNS layer holds `Ui`'s held PATTERN
+  mode for as long as the lever is down; only bank 1 (slots 1–16) is reachable without an encoder.
+- **A key is released with the meaning it was pressed with.** Flip SW18 while holding a step and
+  the release still goes to `Ui::StepRelease`; otherwise `Ui` would be left in lock mode with
+  nothing held, and every pot turn after it would write a p-lock.
+- **Pots use jump pickup, with two thresholds.** The first deliberate move (2 %) after a pot's
+  target changed — track, page, SHIFT, a held step — sets the value to where the pot points. Once
+  engaged it follows at 1/256, and 300 ms idle disengages it. One threshold cannot do both jobs:
+  small enough for a smooth turn means ADC noise on a resting pot writes the *new* track's
+  parameter the moment you change track. This reverses §7's "no pots" reasoning only for the
+  dev kit; the panel keeps encoders.
+- **SHIFT + track key cycles the machine.** Which gesture selects a machine on the real panel is
+  still open (§5); this exists so every machine can be heard on hardware, and prejudges nothing.
+- **One colour, so brightness and blinking carry §7's LED language.** The playhead (and a held
+  step) is full brightness and nothing else is, active steps are 25–55 % by velocity, a lock
+  pulses, the selected track is brightest, a muted track blinks, and holding PAGE shows the
+  current page on keys 1–4.
+- **The LEDs are driven raw.** They are wired active-low and `Hardware::SetLed` gamma-corrects
+  *before* inverting, so its curve comes out backwards and dim levels look nearly full. `main.cpp`
+  applies gamma, inverts, and writes `SetLedRaw`.
+- **The screen is the Seed's USB serial port.** `DisplayRenderer`'s four lines print on change,
+  with SW17/SW18 state and CPU load every 5 s. The overview's playhead row never triggers a print,
+  or a terminal left open would scroll ten lines a second.
+- **Status text is dropped, never waited for.** libDaisy's `Logger` switches to
+  `while(!Transmit()) {}` after two packets, so once nothing on the host reads the port the main
+  loop spins forever: keys, pots and LEDs die while audio plays on, because audio is an interrupt.
+  That shipped in the first dev kit build. `Status()` in `main.cpp` sends raw CDC once and drops the
+  line if the endpoint is busy. It also checks the device is enumerated first, because
+  `CDC_Transmit_FS` dereferences its class data unchecked. **Do not use `StartLog`/`PrintLine` in
+  the instrument firmware**; it is fine in `bringup` and `bench`, which wait for a terminal on
+  purpose.
+
+**Memory.** With the board class (39 kB), `Machine` (50 kB) and two flash-side Patches (31 kB
+each), `.bss` overflows the 128 kB DTCM by 47 kB, and the 256 kB D2 SRAM has no linker section. The
+`Storage` staging buffer and the load buffer go to SDRAM: they are touched only on an explicit save
+or load, so its latency costs nothing. Both have constructors and SDRAM does not work until
+`hw.Init()`, so they are raw `DSY_SDRAM_BSS` storage that is placement-new'd after init — a
+`DSY_SDRAM_BSS` object of either type would be constructed before `main()` and fault. DTCM ends at
+116.6 kB, which leaves **~11 kB for the stack**: worth knowing before adding a large local.
+
+**Flashing** is `make flash`: the ST-Link resets the board, the Daisy bootloader opens its DFU
+window on the Seed's USB-C, and `dfu-util -w` catches it, so no BOOT button. Both cables have to
+be attached: the ST-Link, and the Seed's own USB-C (not the kit's, which is on the external USB
+pins).
+
+### CPU on the H750
+
+The budget is 480 MHz / 48 kHz = **10 000 cycles per sample** for everything. `src/bench.cpp`
+(`make PROGRAM=bench flash`, then open the Seed's serial port) measures it with the DWT cycle
+counter. It then renders the worst case forever, so that a PC-sampling profile can be taken
+without halting the core:
+
+```sh
+openocd -f interface/stlink.cfg -f target/stm32h7x.cfg -c "init" -c "profile 30 build/gmon.out" -c "resume" -c "shutdown"
+arm-none-eabi-gprof -b -p build/drom-triks-bench.elf build/gmon.out
+```
+
+Each voice is measured **sounding**: DECAY at maximum and a retrigger every 100 ms, so it never
+goes idle. Only that is a bound. An earlier version measured one hit followed by mostly silence;
+SD 808 read 692 cycles that way and was picked as a cheap snare, then overran the CPU the moment
+its DECAY went up.
+
+| Whole `Machine`, default kit | first measured | now |
+| --- | --- | --- |
+| stopped | 144 % | **3.5 %** |
+| all 12 tracks on every step | 176 % | **36 %** |
+| … with DECAY at maximum on every track | — | **38 %** |
+| … and reverb, delay and compressor engaged | — | **48 %** |
+
+The last row is the absolute worst case the default kit can produce: half the core is spare.
+
+| Machine, sounding (cycles per sample) | first measured | now |
+| --- | --- | --- |
+| SD 808 | 7 206 | 708 |
+| OH | 3 517 | 372 |
+| SD 909 | 3 048 | 418 |
+| CH | 2 940 | 233 |
+| BD 808 | 1 597 | 424 |
+| FM, SD PUNCH, TOM, RIM, BD 909, CLAP, BD BOOM, GLITCH, TRI | 360–908 | 179–434 |
+
+**Why it was 176 %.** DaisySP's drum models recompute values that depend only on parameters —
+decay coefficients through `powf`, filter coefficients through `Svf::SetFreq`/`SetRes` (a `sinf`
+and a `powf` each) — on **every sample**. `AnalogSnareDrum` does that for six filters: about 5
+`sinf` and 14 `powf` per sample. `AdEnv` re-derives its segment's constants every sample, idle or
+not. None of it was visible on the host.
+
+#### What changed, and how exact each change is
+
+Every claim here is checked rather than assumed. `host/dsptest.cpp` runs each original and its
+replacement side by side, sample for sample, and a deliberately mutated constant is caught.
+
+- **Forks in `src/engine/dsp/`, with the per-sample constants hoisted** into an `Update()` that runs
+  when a parameter changes. `SyntheticSnareDrum`, `AnalogSnareDrum` and both `HiHat`s are
+  **bit-identical** to DaisySP. `AnalogBassDrum` cannot be fully hoisted, because its resonator is
+  FM'd every sample. It uses `Svf::SetFreqResFast` (a Taylor sine and `sqrtf(sqrtf(r))` for
+  `powf(r, 0.25)`), and its worst deviation is **−112 dB**. The open hat's six oscillators are
+  bare square and saw accumulators, also bit-identical.
+- **Noise is per voice.** The forks drew from the C library's `rand()`, one generator shared by
+  every voice, so a voice sleeping or a change in render order shifted every *other* voice's noise.
+  Each instance now has its own LCG, seeded distinctly so two snares hit together are not
+  correlated. The models take the generator as a template parameter, and the equivalence test
+  plugs in `std::rand` to keep proving them bit-identical to DaisySP.
+- **`AdEnv` is cached, and its curve is a true exponential.** The constants are computed once per
+  segment, idle returns straight away, and the curve advances by one multiply, where DaisySP
+  evaluates `expf_fast` (ten). `expf_fast` is `(1 + x/1024)^1024`, not `exp`, so this is the one
+  intended change to the sound: at −4 (`kPercCurve`, the only curve any voice uses) it moves by
+  **0.41 % of full scale**, and every segment ends within one sample of the original. The running
+  exponential is a `double`, because in float its rounding drifted a long decay's end by six
+  samples. The fork also initialises four fields DaisySP's `Init` leaves unset; those made a
+  stack-allocated voice render differently depending on what the stack held.
+- **The reverb is our own** (next section).
+- **Block processing.** Each voice renders its whole 32-sample block through one call, and so does
+  each channel strip, where it was a virtual call per voice and per strip per sample. `BlockVoice`
+  (CRTP) gives every voice a loop over its own `Process()` that the compiler inlines. Triggers still
+  land on their exact sample: `VoiceSlot` splits the block there. **Bit-identical** to the
+  per-sample path, every machine and the full 12-track mix, which `host/dsptest.cpp` checks with
+  odd block sizes, p-locks and voices falling asleep and waking.
+- **Sleep.** A voice stops rendering 100 ms after its output falls below −120 dB, until its next
+  trigger; the clap's bursts are at most ~17 ms apart and the glitch voice's grains run back to back,
+  so no gap inside a sound is mistaken for the end. The reverb sleeps once its input is silent and
+  its tail has been below −120 dB for its longest path (~0.9 s). The compressor is bypassed at 1:1
+  with no makeup, where its gain is provably exactly 1.0; its detector restarts from a stale
+  envelope when re-engaged, which settles within the attack time. A strip with zero input and both
+  filters bypassed is skipped. **Voice sleep is the one change that is not sample-identical**: a
+  sleeping hat's free-running oscillators stop, so its next hit starts at a different phase. Level
+  and timbre do not move. On 10 ms windows the other voices match to 0.00 dB, and CH's hit-to-hit
+  level spread is 3.9 dB against **5.0 dB in the original**, which already landed each hit on an
+  arbitrary phase.
+
+Measured and not adopted: `-O3`, within ±1 % of `-O2` on every row.
+
+#### The reverb: a Dattorro plate
+
+`src/engine/reverb.h` replaced DaisySP's `ReverbSc`, which was LGPL, held 395 kB by value, and once
+the voices were fixed was the largest single cost (~1 200 cycles a sample). It is the plate from
+Dattorro's 1997 paper: band-limited, pre-delayed mono input, four diffusers, and a figure-of-eight
+tank whose two allpasses are slowly modulated, which is what stops a plate ringing metallically on
+drums. SIZE is now a calibrated decay time (RT60 0.3–10 s, exponential, measured within 25 % by
+`host/fxtest.cpp`). DAMP keeps its 18 kHz → 1.5 kHz map. **REV PRE is now live**, 0–100 ms; it was
+labelled on screen but did nothing, which is the dead knob [hardware §2](01-hardware.md#2-panel-layout)
+forbids.
+
+It needs ~165 kB, caller-provided, and **where that lives decides what it costs**. In SDRAM it was
+dearer than `ReverbSc`, because it reads 14 output taps and 12 lines scattered across its buffer every
+sample and nearly every read missed the cache. In AXI SRAM it is **~600 cycles, half `ReverbSc`'s**.
+libDaisy's BOOT_SRAM linker script gives the free AXI SRAM no data section, so `ld/drom_sram.lds` is a
+copy that adds `.sram_bss`. It is deliberately the last SRAM section, so it never pads the firmware
+image, and it is `NOLOAD`, so whatever lives there must initialise itself. It also means a board
+without SDRAM can still host the reverb.
+
+#### Where the worst case goes now
+
+From the profile, roughly: the reverb 12 %, `AdEnv` and the drum models' own filters most of the
+rest, channel strips 8 %, the compressor ~8 % when engaged. What is left is real DSP rather than
+overhead. The next steps, none of them free:
+
+- **The compressor** runs its detector twice per sample, once per side, through the two-argument
+  `Process`. Once would halve it but double its time constants, which changes the sound.
+- **ITCM**: the hot path could run from the 64 kB zero-wait ITCM, which needs another linker section
+  and a startup copy. Untried.
+
+**On convolution reverb**, since it came up: it would be dearer, not cheaper. Even partitioned FFT
+convolution of a 2 s stereo tail is several times the plate's cost on an M7, needs its impulse
+response and FFT buffers in memory alongside, and loses SIZE and DAMP, because a fixed impulse
+response is a fixed room.

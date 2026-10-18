@@ -125,27 +125,28 @@ about it, because the easy version of the answer is aimed at the wrong target.
 
 | Seed3 supplies | drom-triks uses |
 | --- | --- |
-| 64 MB SDRAM | the master FX buffers, ~450 kB — see below. `Machine` is ~30 kB and samples stream from SD, so nothing else wants it |
+| 64 MB SDRAM | the master delay's buffer, 768 kB at 2 s — see below. The reverb's ~165 kB is in AXI SRAM, `Machine` (~50 kB) in DTCM, and samples stream from SD, so nothing else wants it |
 | 8 MB QSPI | 2.7 MB of patterns, kits and songs; 4.3 MB reserved ([firmware §8](02-firmware.md#8-persistence)) |
-| 480 MHz Cortex-M7 | under 20 % for eight voices plus master FX ([firmware §5](02-firmware.md#5-voice-engine)) |
+| 480 MHz Cortex-M7 | measured: 36 % with all twelve tracks on every step, 48 % in the absolute worst case (DECAY at maximum, reverb, delay and compressor engaged) — [firmware §10](02-firmware.md#cpu-on-the-h750). The earlier estimate here, under 20 %, was wrong by more than 7× until the engine was reworked |
 | 31 broken-out GPIO | 18 assigned — but 31 is the number that forced 1-bit SDMMC, the SAI2 pin scramble, "SPI2 is unusable", and D29/D30 held hostage to USB host ([hardware §3.6](01-hardware.md#36-pin-map)) |
 | TAC5242 codec, power tree, USB-C | genuinely used, and good |
 
 The 64 MB SDRAM is the headline spec in [hardware §1](01-hardware.md#1-board-choice-daisy-seed3), and
-the design uses **about 450 kB of it** — the master delay line plus `ReverbSc`'s 395 kB `aux_` array
-([firmware §5](02-firmware.md#5-voice-engine)). Sample storage is bounded by spare QSPI or by an SD
+the design uses **about 770 kB of it** — the master delay line, sized at 2 s on the dev kit
+([firmware §10](02-firmware.md#10-the-desktop-dev-kit)). The reverb, which once took 395 kB of it,
+is now our own and lives in AXI SRAM ([firmware §10](02-firmware.md#the-reverb-a-dattorro-plate)). Sample storage is bounded by spare QSPI or by an SD
 card streamed in Phase 7; neither wants a 10-minute RAM buffer.
 
 > An earlier revision of this section said nothing touched the SDRAM at all. That was true before
 > the master effects existed and is not true now. It does not change the conclusion, but for a
-> reason worth stating: **the 450 kB is only in SDRAM because of `BOOT_SRAM`.** On the Seed3 the
+> reason worth stating: **the delay is only in SDRAM because of `BOOT_SRAM`.** On the Seed3 the
 > staged app image occupies the 480 kB AXI SRAM, so statics have the 128 kB DTCM and little else.
-> An H743 booting from its own 2 MB flash leaves that whole 512 kB free, and the FX buffers fit in
-> it with room to spare. The SDRAM requirement is an artefact of the H750's tiny internal flash,
+> An H743 booting from its own 2 MB flash leaves that whole 512 kB free. The reverb's 165 kB fits in
+> it; the delay fits alongside only if it is capped at about 0.8 s (~310 kB), not the dev kit's 2 s. The SDRAM requirement is an artefact of the H750's tiny internal flash,
 > not of the audio design — which makes it an argument *for* §5's candidate, not against it.
 
 A processor and memory that "suit our purposes exactly" would still mean *less* memory, not custom
-memory: 450 kB of use does not justify 64 MB of part.
+memory: under a megabyte of use does not justify 64 MB of part.
 
 ### 5.2 Three different projects wear the same name
 

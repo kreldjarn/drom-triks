@@ -126,8 +126,12 @@ Pattern BuildPattern()
 
 int SelfTest()
 {
-    BassDrum bd; SnareDrum sd; ClosedHat ch; OpenHat oh;
-    Tom lt; Clap cp; RimShot rs; FmVoice fm;
+    // Static, not locals: daisysp::AdEnv::Init leaves four fields unset, so a
+    // voice built on the stack rendered differently depending on what the stack
+    // held — the first clap of a render changed with unrelated code. Firmware
+    // voices live in zeroed static memory, which is what this has to match.
+    static BassDrum bd; static SnareDrum sd; static ClosedHat ch; static OpenHat oh;
+    static Tom lt; static Clap cp; static RimShot rs; static FmVoice fm;
     IVoice *voices[] = {&bd, &sd, &ch, &oh, &lt, &cp, &rs, &fm};
 
     // Digital voices only: an empty cartridge slot is silent by
@@ -172,12 +176,21 @@ int main(int argc, char **argv)
             out = argv[i];
     }
 
-    BassDrum bd; SnareDrum sd; ClosedHat ch; OpenHat oh;
-    Tom lt; Clap cp; RimShot rs; FmVoice fm;
+    // Static, not locals: daisysp::AdEnv::Init leaves four fields unset, so a
+
+    // voice built on the stack rendered differently depending on what the stack
+
+    // held — the first clap of a render changed with unrelated code. Firmware
+
+    // voices live in zeroed static memory, which is what this has to match.
+
+    static BassDrum bd; static SnareDrum sd; static ClosedHat ch; static OpenHat oh;
+
+    static Tom lt; static Clap cp; static RimShot rs; static FmVoice fm;
     // Twelve slots, matching the firmware: the upper four are cartridge
     // slots with nothing plugged in. Rendering the same shape the hardware
     // runs is the point of this tool.
-    EmptySlot cart[kNumCartridgeSlots];
+    static EmptySlot cart[kNumCartridgeSlots];
     IVoice   *voices[kNumTracks] = {&bd, &sd, &ch, &oh, &lt, &cp, &rs, &fm};
     for(int i = 0; i < kNumCartridgeSlots; ++i)
         voices[kNumDigitalVoices + i] = &cart[i];

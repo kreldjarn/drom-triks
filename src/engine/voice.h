@@ -1,5 +1,6 @@
 #pragma once
 #include <cmath>
+#include <cstddef>
 #include <cstdint>
 #include "lfo.h"
 
@@ -241,6 +242,17 @@ class IVoice
     virtual void SetParam(ParamId id, float value) = 0;
 
     virtual float Process() = 0;
+
+    /// `n` samples at once — what the audio path calls (docs/02-firmware.md
+    /// §10). The default calls Process() per sample, which is correct for
+    /// anything and is what the test doubles rely on. Real voices derive from
+    /// BlockVoice, which overrides this with a loop the compiler can inline:
+    /// one virtual call per block instead of one per sample.
+    virtual void ProcessBlock(float *out, size_t n)
+    {
+        for(size_t i = 0; i < n; ++i)
+            out[i] = Process();
+    }
 };
 
 /// The per-sample stereo bus, plus the two effect sends.
@@ -255,6 +267,38 @@ struct MixBus
     float reverb_l = 0.f, reverb_r = 0.f;
 
     void Clear() { *this = MixBus{}; }
+};
+
+/// The bus for one block: MixBus as arrays. Channel strips accumulate into it
+/// track by track, and the master effects then read it sample by sample.
+///
+/// Each element receives the tracks in the same order the per-sample loop
+/// adds them, so the sums are the same floats.
+struct MixBlock
+{
+    static constexpr size_t kMaxFrames = 32;
+
+    float l[kMaxFrames], r[kMaxFrames];
+    float delay_l[kMaxFrames], delay_r[kMaxFrames];
+    float reverb_l[kMaxFrames], reverb_r[kMaxFrames];
+
+    void Clear(size_t n)
+    {
+        for(size_t i = 0; i < n; ++i)
+            l[i] = r[i] = delay_l[i] = delay_r[i] = reverb_l[i] = reverb_r[i] = 0.f;
+    }
+
+    MixBus At(size_t i) const
+    {
+        MixBus b;
+        b.l        = l[i];
+        b.r        = r[i];
+        b.delay_l  = delay_l[i];
+        b.delay_r  = delay_r[i];
+        b.reverb_l = reverb_l[i];
+        b.reverb_r = reverb_r[i];
+        return b;
+    }
 };
 
 /// True for parameters owned by the channel strip rather than by the voice.
@@ -304,6 +348,27 @@ class IChannel
     virtual void SetParam(ParamId id, float value) = 0;
     /// Adds this track's contribution to the bus.
     virtual void Process(float in, MixBus &bus) = 0;
+
+    /// A block's worth. The default goes through Process() per sample, for
+    /// the test doubles; ChannelStrip overrides it.
+    virtual void ProcessBlock(const float *in, size_t n, MixBlock &bus)
+    {
+        for(size_t i = 0; i < n; ++i)
+        {
+            MixBus b;
+            Process(in[i], b);
+            bus.l[i] += b.l;
+            bus.r[i] += b.r;
+            bus.delay_l[i] += b.delay_l;
+            bus.delay_r[i] += b.delay_r;
+            bus.reverb_l[i] += b.reverb_l;
+            bus.reverb_r[i] += b.reverb_r;
+        }
+    }
+
+    /// True if, given silence, this adds nothing — no filter tail left to
+    /// ring out. Lets a sleeping voice skip its strip entirely.
+    virtual bool PassesSilence() const { return false; }
 };
 
 /// A strip that only pans nothing and sums to both sides.
@@ -317,6 +382,7 @@ class DirectChannel : public IChannel
     void Init(float) override {}
     void SetParam(ParamId, float) override {}
     void Process(float in, MixBus &bus) override { bus.l += in; bus.r += in; }
+    bool PassesSilence() const override { return true; }
 };
 
 inline DirectChannel &NullChannel()
@@ -378,23 +444,83 @@ class VoiceSlot
     float Process()
     {
         if(delay_ == 0)
-        {
-            ApplyLocks();
-            // Order matters: locks first so the LFO modulates this step's
-            // locked value, then the reset, then push the modulated value so a
-            // trig-synced LFO is already at its start phase when the voice
-            // fires rather than a block later.
-            lfo_.Trigger();
-            ApplyLfo();
-            voice_->Trigger(velocity_);
-        }
+            Fire();
         if(delay_ >= 0)
             --delay_;
-        return voice_->Process();
+
+        // Asleep: the voice has been below -120 dB for 100 ms since its last
+        // trigger, so it is finished and is not rendered until the next one.
+        //
+        // Several voices already skip their own work when done, but DaisySP's
+        // drum models (and their forks in dsp/) never stop: an exponential
+        // decay is never exactly zero, so a silent hat still cost its full
+        // price every sample. This makes "done" uniform across every machine.
+        //
+        // 100 ms is far longer than any silent gap *inside* a sound — the
+        // clap's bursts are at most ~17 ms apart and the glitch voice's grains
+        // run back to back — so a pause cannot be mistaken for the end. What
+        // is cut is a tail already below the codec's own noise floor.
+        if(quiet_ >= kSleepSamples)
+            return 0.f;
+        const float s = voice_->Process();
+        quiet_        = std::fabs(s) < kSilence ? quiet_ + 1 : 0;
+        return s;
     }
 
     /// Voice, then channel strip, accumulated into the bus.
     void Process(MixBus &bus) { channel_->Process(Process(), bus); }
+
+    /// The block path: `n` samples of this voice into `scratch`, then through
+    /// its strip into `bus`. Same output as calling Process() n times.
+    ///
+    /// The block is split at the trigger's sample, so a hit still lands on
+    /// exactly the sample the sequencer asked for — never on a block boundary,
+    /// which CLAUDE.md forbids. Between splits the voice renders in one
+    /// ProcessBlock call.
+    void ProcessBlock(float *scratch, size_t n, MixBlock &bus)
+    {
+        if(RenderBlock(scratch, n) && channel_->PassesSilence())
+            return; // asleep, and the strip has no tail: adds nothing
+        channel_->ProcessBlock(scratch, n, bus);
+    }
+
+    /// The voice alone, as ProcessBlock renders it. Returns true if every
+    /// sample came from the sleep path, i.e. is an exact zero.
+    bool RenderBlock(float *out, size_t n)
+    {
+        bool   silent = true;
+        size_t i      = 0;
+        while(i < n)
+        {
+            // The per-sample semantics, run-length encoded: a trigger fires
+            // on the sample where delay_ reaches 0, and delay_ counts down
+            // one per sample until then.
+            if(delay_ == 0)
+            {
+                Fire();
+                delay_ = -1;
+            }
+            size_t run = n - i;
+            if(delay_ > 0)
+            {
+                if(static_cast<size_t>(delay_) < run)
+                    run = static_cast<size_t>(delay_);
+                delay_ -= static_cast<int32_t>(run);
+            }
+            if(quiet_ >= kSleepSamples)
+            {
+                for(size_t k = 0; k < run; ++k)
+                    out[i + k] = 0.f; // asleep: exact zeros
+            }
+            else
+            {
+                RenderRun(out + i, run);
+                silent = false;
+            }
+            i += run;
+        }
+        return silent;
+    }
 
     /// Advances the LFO one block and pushes the modulated value.
     ///
@@ -431,6 +557,58 @@ class VoiceSlot
     }
 
   private:
+    void Fire()
+    {
+        ApplyLocks();
+        // Order matters: locks first so the LFO modulates this step's
+        // locked value, then the reset, then push the modulated value so a
+        // trig-synced LFO is already at its start phase when the voice
+        // fires rather than a block later.
+        lfo_.Trigger();
+        ApplyLfo();
+        voice_->Trigger(velocity_);
+        quiet_ = 0;
+    }
+
+    /// One trigger-free run, with exactly the per-sample loop's sleep
+    /// behaviour: the voice is processed up to and including the sample on
+    /// which it has been silent for kSleepSamples, and not one sample more.
+    ///
+    /// That is not a nicety. A sleeping voice's state freezes, and the hats'
+    /// oscillators free-run, so rendering even a few samples past that point
+    /// moves their phase at the next hit — a different waveform. The run is
+    /// cut at the earliest sample sleep could begin, which is kSleepSamples -
+    /// quiet_ ahead and usually far beyond the end of the block.
+    ///
+    /// Returns true if every sample is a sleep-path zero.
+    bool RenderRun(float *out, size_t n)
+    {
+        size_t i = 0;
+        while(i < n)
+        {
+            if(quiet_ >= kSleepSamples)
+            {
+                for(; i < n; ++i)
+                    out[i] = 0.f;
+                return false;
+            }
+            size_t chunk = n - i;
+            const size_t to_sleep = kSleepSamples - quiet_;
+            if(chunk > to_sleep)
+                chunk = to_sleep;
+            voice_->ProcessBlock(out + i, chunk);
+            // quiet_ is the count of trailing silent samples, as the
+            // per-sample loop keeps it.
+            size_t loud_end = chunk;
+            while(loud_end > 0 && std::fabs(out[i + loud_end - 1]) < kSilence)
+                --loud_end;
+            quiet_ = loud_end == 0 ? quiet_ + static_cast<uint32_t>(chunk)
+                                   : static_cast<uint32_t>(chunk - loud_end);
+            i += chunk;
+        }
+        return false;
+    }
+
     /// Restore whatever the previous step locked, then apply this step's locks.
     ///
     /// Restoring first is what stops a lock leaking into every later step —
@@ -529,9 +707,16 @@ class VoiceSlot
         Dispatch(static_cast<ParamId>(d), v);
     }
 
+    /// -120 dBFS, far below the 24-bit codec's own floor.
+    static constexpr float    kSilence      = 1e-6f;
+    static constexpr uint32_t kSleepSamples = 4800; ///< 100 ms at 48 kHz
+
     IVoice          *voice_    = nullptr;
     IChannel        *channel_  = nullptr;
     int32_t          delay_    = -1;
+    /// Samples since the voice was last above kSilence. Starts awake: a
+    /// voice that has never fired is silent, and falls asleep on its own.
+    uint32_t         quiet_    = 0;
     float            velocity_ = 0.f;
     const ParamLock *locks_      = nullptr;
     uint8_t          lock_count_ = 0;
@@ -623,6 +808,27 @@ class EmptySlot : public VoiceBase
     void  Init(float) override {}
     void  Trigger(float) override {}
     float Process() override { return 0.f; }
+    void  ProcessBlock(float *out, size_t n) override
+    {
+        for(size_t i = 0; i < n; ++i)
+            out[i] = 0.f;
+    }
+};
+
+/// The base for real voices. Overrides IVoice::ProcessBlock with a loop over
+/// the derived class's own Process(), called non-virtually, so the compiler
+/// can inline it and keep the voice's state in registers across the block.
+/// CRTP rather than a macro so every voice gets it the same way.
+template <typename Derived>
+class BlockVoice : public VoiceBase
+{
+  public:
+    void ProcessBlock(float *out, size_t n) final
+    {
+        Derived &d = static_cast<Derived &>(*this);
+        for(size_t i = 0; i < n; ++i)
+            out[i] = d.Derived::Process();
+    }
 };
 
 } // namespace drom

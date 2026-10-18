@@ -1,7 +1,12 @@
 #pragma once
 #include "daisysp.h"
+#include "../dsp/adenv.h"
+#include "../dsp/drum_models.h"
 #include "../voice.h"
 
+// Envelopes are dsp::AdEnv, a bit-identical copy of daisysp::AdEnv without its
+// per-sample constant maths (docs/02-firmware.md §10).
+//
 // The four voices DaisySP doesn't cover. Each is built from primitives, and
 // each maps the same INST-page macros as the DaisySP-backed voices so muscle memory
 // transfers between tracks (docs/01-hardware.md §2).
@@ -29,7 +34,7 @@ inline float DecayTime(float v)
 
 /// Tom. A sine with a fast downward pitch sweep — the sweep is what separates a
 /// tom from a beep, and TONE controls how far it falls.
-class Tom : public VoiceBase
+class Tom : public BlockVoice<Tom>
 {
   public:
     void Init(float sr) override
@@ -95,13 +100,13 @@ class Tom : public VoiceBase
     }
 
     daisysp::Oscillator osc_;
-    daisysp::AdEnv      amp_, pitch_;
+    dsp::AdEnv      amp_, pitch_;
     float               sr_ = 48000.f, base_hz_ = 120.f, sweep_amt_ = 0.5f, vel_ = 1.f;
 };
 
 /// Clap. Three closely spaced noise bursts then a longer tail, all through a
 /// bandpass — the burst spacing is the whole character, and SNAP controls it.
-class Clap : public VoiceBase
+class Clap : public BlockVoice<Clap>
 {
   public:
     void Init(float sr) override
@@ -182,7 +187,7 @@ class Clap : public VoiceBase
 
     daisysp::WhiteNoise noise_;
     daisysp::Svf        bpf_;
-    daisysp::AdEnv      burst_, tail_;
+    dsp::AdEnv      burst_, tail_;
     float               sr_ = 48000.f, spread_s_ = 0.012f, vel_ = 1.f;
     int                 bursts_left_ = 0, countdown_ = 0;
     bool                tail_started_ = true;
@@ -190,7 +195,7 @@ class Clap : public VoiceBase
 
 /// Rimshot. Two detuned squares through a sharp resonant bandpass with a very
 /// short decay — the detuning is what gives the metallic beat in the attack.
-class RimShot : public VoiceBase
+class RimShot : public BlockVoice<RimShot>
 {
   public:
     void Init(float sr) override
@@ -256,7 +261,7 @@ class RimShot : public VoiceBase
 
     daisysp::Oscillator a_, b_;
     daisysp::Svf        bpf_;
-    daisysp::AdEnv      env_;
+    dsp::AdEnv      env_;
     float               base_hz_ = 400.f, detune_ = 1.4f, vel_ = 1.f;
 };
 
@@ -301,7 +306,7 @@ inline float FastSin(float phase)
 ///
 /// Covers cowbell, metallic percussion, sharp blips and sub depending mostly
 /// on where TONE (ratio) and SNAP (index) sit.
-class FmVoice : public VoiceBase
+class FmVoice : public BlockVoice<FmVoice>
 {
   public:
     void Init(float sr) override
@@ -467,7 +472,7 @@ class FmVoice : public VoiceBase
                      0.004f + (1.f - param(ParamId::Snap)) * 0.10f);
     }
 
-    daisysp::AdEnv     amp_, idx_, pitch_;
+    dsp::AdEnv     amp_, idx_, pitch_;
     daisysp::Decimator crush_;
     float              inv_sr_   = 1.f / 48000.f;
     float              cphase_ = 0.f, mphase_ = 0.f, m3phase_ = 0.f, fb_ = 0.f;
@@ -488,7 +493,7 @@ class FmVoice : public VoiceBase
 /// either alone: a long amplitude tail under a pitch drop that finishes early
 /// reads as "boom", while the same drop under a short tail is just a click.
 /// SNAP sets the sweep depth, so it moves between a sub thud and a laser.
-class BassDrumBoom : public VoiceBase
+class BassDrumBoom : public BlockVoice<BassDrumBoom>
 {
   public:
     void Init(float sr) override
@@ -565,7 +570,7 @@ class BassDrumBoom : public VoiceBase
         sweep_coeff_        = expf(-1.f / (sweep_s * sr_));
     }
 
-    daisysp::AdEnv amp_;
+    dsp::AdEnv amp_;
     float sr_ = 48000.f, phase_ = 0.f, base_hz_ = 45.f;
     float sweep_ = 0.f, sweep_coeff_ = 0.999f, depth_ = 6.f;
     float tone_ = 0.5f, vel_ = 1.f;
@@ -577,7 +582,7 @@ class BassDrumBoom : public VoiceBase
 /// Two noise envelopes rather than one — a few-millisecond crack and a longer
 /// rattle — because a single envelope can be sharp or sustained but not both,
 /// and a snare needs the attack to outrun its own tail.
-class SnareDrumPunch : public VoiceBase
+class SnareDrumPunch : public BlockVoice<SnareDrumPunch>
 {
   public:
     void Init(float sr) override
@@ -668,7 +673,7 @@ class SnareDrumPunch : public VoiceBase
     }
 
     daisysp::WhiteNoise noise_;
-    daisysp::AdEnv      crack_, rattle_, body_;
+    dsp::AdEnv      crack_, rattle_, body_;
     daisysp::Svf        hp_;
     float sr_ = 48000.f, phase_ = 0.f, base_hz_ = 200.f;
     float drop_ = 0.f, drop_coeff_ = 0.99f;
@@ -681,7 +686,7 @@ class SnareDrumPunch : public VoiceBase
 /// The click is a separate few-millisecond noise burst through a highpass
 /// rather than FM on the body: FM brightens the whole hit, while a 909 click is
 /// a distinct transient that stops before the body has finished moving.
-class BassDrum909 : public VoiceBase
+class BassDrum909 : public BlockVoice<BassDrum909>
 {
   public:
     void Init(float sr) override
@@ -759,7 +764,7 @@ class BassDrum909 : public VoiceBase
     }
 
     daisysp::WhiteNoise noise_;
-    daisysp::AdEnv      amp_, click_;
+    dsp::AdEnv      amp_, click_;
     daisysp::Svf        hp_;
     float sr_ = 48000.f, phase_ = 0.f, base_hz_ = 55.f;
     float drop_ = 0.f, drop_coeff_ = 0.99f, depth_ = 4.f;
@@ -776,7 +781,7 @@ class BassDrum909 : public VoiceBase
 /// Holding it at a fixed value and gating the output with our own envelope
 /// keeps the 808 character and makes DECAY mean what it says - which is exactly
 /// the fix docs/02-firmware.md 5 records but never applied.
-class SnareDrum808 : public VoiceBase
+class SnareDrum808 : public BlockVoice<SnareDrum808>
 {
   public:
     void Init(float sr) override
@@ -834,8 +839,8 @@ class SnareDrum808 : public VoiceBase
                      DecayTime(param(ParamId::Decay)) * 0.6f);
     }
 
-    daisysp::AnalogSnareDrum d_;
-    daisysp::AdEnv           amp_;
+    dsp::AnalogSnareDrum<>    d_;
+    dsp::AdEnv           amp_;
     bool                     pending_ = false;
 };
 
@@ -847,7 +852,7 @@ class SnareDrum808 : public VoiceBase
 /// reproducible. Above zero the seed advances per hit, so no two are the same.
 /// That is deliberate - a machine that never repeats is fun and impossible to
 /// arrange with, so the knob has to reach both.
-class GlitchPerc : public VoiceBase
+class GlitchPerc : public BlockVoice<GlitchPerc>
 {
   public:
     void Init(float sr) override
@@ -939,7 +944,7 @@ class GlitchPerc : public VoiceBase
     }
 
     daisysp::Decimator crush_;
-    daisysp::AdEnv     grain_env_;
+    dsp::AdEnv     grain_env_;
     uint32_t rng_ = 0x9E3779B9u;
     float sr_ = 48000.f, phase_ = 0.f, hz_ = 440.f, duty_ = 0.5f;
     float base_hz_ = 400.f, grain_s_ = 0.02f, chaos_ = 0.5f, vel_ = 1.f;
@@ -959,7 +964,7 @@ class GlitchPerc : public VoiceBase
 /// SNAP stretches those ratios further apart. Real triangles are bent bars
 /// rather than straight ones, so their partials are messier than the ideal, and
 /// stretching is what moves the sound from "tuned bar" toward "triangle".
-class Triangle : public VoiceBase
+class Triangle : public BlockVoice<Triangle>
 {
   public:
     static constexpr int kModes = 6;
@@ -1070,7 +1075,7 @@ class Triangle : public VoiceBase
     }
 
     daisysp::WhiteNoise noise_;
-    daisysp::AdEnv      strike_;
+    dsp::AdEnv      strike_;
     float               y1_[kModes] = {}, y2_[kModes] = {};
     float               b1_[kModes] = {}, r2_[kModes] = {}, gain_[kModes] = {};
     float   sr_ = 48000.f, base_hz_ = 1800.f, bright_ = 0.5f, stretch_ = 0.3f;

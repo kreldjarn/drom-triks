@@ -36,6 +36,7 @@ endif
 DSP_LIB  := $(BUILD_DIR)/libdaisysp_host.a
 
 ENGINE_HDRS := $(wildcard ../src/engine/*.h) $(wildcard ../src/engine/voices/*.h) \
+               $(wildcard ../src/engine/dsp/*.h) \
                $(wildcard ../src/seq/*.h) $(wildcard ../src/io/*.h) \
                $(wildcard ../src/ui/*.h) $(wildcard ../src/util/*.h) ../src/machine.h
 
@@ -76,6 +77,12 @@ $(BUILD_DIR)/machinetest: machinetest.cpp $(ENGINE_HDRS) $(DSP_LIB)
 $(BUILD_DIR)/uxtest: uxtest.cpp $(ENGINE_HDRS) $(DSP_LIB)
 	$(CXX) $(CXXFLAGS) uxtest.cpp $(DSP_LIB) -o $@
 
+$(BUILD_DIR)/devkittest: devkittest.cpp $(ENGINE_HDRS) $(DSP_LIB)
+	$(CXX) $(CXXFLAGS) devkittest.cpp $(DSP_LIB) -o $@
+
+$(BUILD_DIR)/dsptest: dsptest.cpp $(ENGINE_HDRS) $(DSP_LIB)
+	$(CXX) $(CXXFLAGS) dsptest.cpp $(DSP_LIB) -o $@
+
 # macOS only: CoreAudio for output, no third-party dependencies.
 $(BUILD_DIR)/play: play.cpp $(ENGINE_HDRS) $(DSP_LIB)
 	$(CXX) $(CXXFLAGS) play.cpp $(DSP_LIB) -o $@ \
@@ -114,7 +121,7 @@ $(BUILD_DIR)/clocktest: clocktest.cpp $(ENGINE_HDRS)
 	@mkdir -p $(BUILD_DIR)
 	$(CXX) $(CXXFLAGS) clocktest.cpp -o $@
 
-.PHONY: seqtest locktest clocktest sysextest storagetest lfotest striptest fxtest uitest machinetest uxtest play
+.PHONY: seqtest locktest clocktest sysextest storagetest lfotest striptest fxtest uitest machinetest uxtest devkittest dsptest play
 seqtest:     $(BUILD_DIR)/seqtest;     $<
 locktest:    $(BUILD_DIR)/locktest;    $<
 clocktest:   $(BUILD_DIR)/clocktest;   $<
@@ -126,6 +133,8 @@ sysextest:   $(BUILD_DIR)/sysextest;   $<
 uitest:      $(BUILD_DIR)/uitest;      $<
 machinetest: $(BUILD_DIR)/machinetest; $<
 uxtest:      $(BUILD_DIR)/uxtest;      $<
+devkittest:  $(BUILD_DIR)/devkittest;  $<
+dsptest:     $(BUILD_DIR)/dsptest;     $<
 play:        $(BUILD_DIR)/play;        $<
 
 run: $(BUILD_DIR)/render
@@ -133,11 +142,11 @@ run: $(BUILD_DIR)/render
 
 test: $(BUILD_DIR)/seqtest $(BUILD_DIR)/locktest $(BUILD_DIR)/clocktest \
       $(BUILD_DIR)/sysextest $(BUILD_DIR)/storagetest $(BUILD_DIR)/lfotest $(BUILD_DIR)/striptest $(BUILD_DIR)/fxtest $(BUILD_DIR)/uitest $(BUILD_DIR)/machinetest \
-      $(BUILD_DIR)/uxtest $(BUILD_DIR)/render
+      $(BUILD_DIR)/uxtest $(BUILD_DIR)/devkittest $(BUILD_DIR)/dsptest $(BUILD_DIR)/render
 	@$(BUILD_DIR)/seqtest && $(BUILD_DIR)/locktest && $(BUILD_DIR)/clocktest \
 	  && $(BUILD_DIR)/sysextest && $(BUILD_DIR)/storagetest && $(BUILD_DIR)/lfotest && $(BUILD_DIR)/striptest && $(BUILD_DIR)/fxtest \
 	  && $(BUILD_DIR)/uitest && $(BUILD_DIR)/machinetest \
-	  && $(BUILD_DIR)/uxtest && $(BUILD_DIR)/render --selftest
+	  && $(BUILD_DIR)/uxtest && $(BUILD_DIR)/devkittest && $(BUILD_DIR)/dsptest && $(BUILD_DIR)/render --selftest
 
 clean:
 	rm -rf $(BUILD_DIR)

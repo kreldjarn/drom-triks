@@ -52,9 +52,9 @@ make             # the firmware, seconds
 
 **`--recurse-submodules` is not optional**, and there are now two reasons rather than one.
 libDaisy has nested submodules (CMSIS, the STM32 HAL drivers), without which the build dies on a
-missing `stm32h7xx_hal.h`. And **DaisySP-LGPL is a submodule of DaisySP** — the master reverb and
-compressor come from it ([firmware §5](02-firmware.md#5-voice-engine)), so a one-level checkout
-leaves the host build linking against an archive with no `ReverbSc` in it. `host/Makefile` checks
+missing `stm32h7xx_hal.h`. And **DaisySP-LGPL is a submodule of DaisySP** — the master compressor comes
+from it ([firmware §5](02-firmware.md#5-voice-engine)), so a one-level checkout leaves the host build
+linking against an archive with no `Compressor` in it. `host/Makefile` checks
 for that case explicitly and says so, because the raw symptom is a wall of undefined references. If you already
 cloned without it:
 
@@ -106,6 +106,7 @@ Two ways in, and the fast one is worth setting up properly:
 | --- | --- | --- | --- |
 | **ST-Link + GDB** | `make debug-server`, then `make gdb` | seconds | everyday iteration |
 | **DFU** | `make program-dfu` | ~20 s + button dance | standalone running, no debugger attached |
+| **ST-Link reset + DFU** | `make flash` | ~5 s, no buttons | standalone running, with both cables attached ([firmware §10](02-firmware.md#10-the-desktop-dev-kit)) |
 
 Under `BOOT_SRAM` the ELF is linked for SRAM at `0x24000000`, so GDB can `load` straight into
 RAM and skip the bootloader's QSPI staging entirely. That's what makes the 30-second target
@@ -116,7 +117,8 @@ ST-Link and builds first.
 
 ## 6. Bring-up checklist
 
-`src/main.cpp` exists only to prove these four things. Run it and confirm each:
+`src/bringup.cpp` exists only to prove these four things. Build it with `make PROGRAM=bringup`
+(and flash with `make PROGRAM=bringup flash`), run it and confirm each:
 
 | # | Test | Pass looks like | Fail means |
 | --- | --- | --- | --- |

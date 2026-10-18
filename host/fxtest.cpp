@@ -4,8 +4,11 @@
 // zero that still bleeds, a delay whose feedback never decays, a compressor
 // that pumps the stereo image because its detector is not linked.
 
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <initializer_list>
+#include <vector>
 
 #include "../src/engine/fx.h"
 
@@ -30,7 +33,8 @@ void Near(float got, float want, float tol, const char *what)
 
 constexpr size_t kDelayFrames = 24000; // 0.5 s at 48 kHz
 float            g_delay[kDelayFrames * 2];
-daisysp::ReverbSc g_reverb;            // 395 kB — a static, never a member
+constexpr size_t kReverbFloats = PlateReverb::BufferFloats(48000.f);
+float            g_reverb[kReverbFloats]; // ~165 kB — a static, never a member
 
 MixBus Send(float dry, float delay, float reverb)
 {
@@ -117,7 +121,7 @@ int main()
     std::printf("\nreverb:\n");
     {
         MasterFx fx;
-        fx.Init(48000.f, g_delay, kDelayFrames, &g_reverb);
+        fx.Init(48000.f, g_delay, kDelayFrames, g_reverb, kReverbFloats);
         fx.SetParam(FxId::ReverbLevel, 0.f);
         fx.SetParam(FxId::DelayFeedback, 0.f);
 
@@ -129,7 +133,7 @@ int main()
     }
     {
         MasterFx fx;
-        fx.Init(48000.f, g_delay, kDelayFrames, &g_reverb);
+        fx.Init(48000.f, g_delay, kDelayFrames, g_reverb, kReverbFloats);
         fx.SetParam(FxId::ReverbLevel, 1.f);
         fx.SetParam(FxId::ReverbSize, 0.8f);
         fx.SetParam(FxId::DelayFeedback, 0.f);
@@ -148,10 +152,115 @@ int main()
         Check(tail > 1e-4f, "a tail continues after the input stops", tail, 1.f);
     }
 
+    std::printf("\nplate reverb:\n");
+    {
+        // SIZE is a decay time, so measure one. Excite with a short burst,
+        // then time the tail's fall from -5 dB to -25 dB below its peak (20
+        // ms RMS windows) and extrapolate to 60 dB — the early-decay method,
+        // since a full 60 dB fall runs into float noise on long settings.
+        static PlateReverb rv;
+        for(float target : {0.5f, 3.0f})
+        {
+            rv.Init(48000.f, g_reverb, kReverbFloats);
+            rv.SetDecayTime(target);
+            rv.SetDamping(18000.f);
+            std::vector<float> env;
+            float              acc = 0.f;
+            uint32_t           rng = 1;
+            const int          n   = static_cast<int>(48000 * target * 1.5f);
+            for(int i = 0; i < n; ++i)
+            {
+                rng            = rng * 1664525u + 1013904223u;
+                const float in = i < 480 ? (static_cast<float>(rng >> 9) / 4194304.f - 1.f) : 0.f;
+                float       l, r;
+                rv.Process(in, in, l, r);
+                acc += l * l + r * r;
+                if(i % 960 == 959)
+                {
+                    env.push_back(10.f * std::log10(acc / 960.f + 1e-30f));
+                    acc = 0.f;
+                }
+            }
+            const float peak = *std::max_element(env.begin(), env.end());
+            int         a = -1, b = -1;
+            for(size_t i = 0; i < env.size(); ++i)
+            {
+                if(a < 0 && env[i] <= peak - 5.f && i > 0 && env[i - 1] > env[i])
+                    a = static_cast<int>(i);
+                if(a >= 0 && b < 0 && env[i] <= peak - 25.f)
+                    b = static_cast<int>(i);
+            }
+            const float rt60 = (b - a) * 0.02f * 3.f;
+            char        what[64];
+            std::snprintf(what, sizeof(what), "SIZE sets RT60: %.1f s asked", target);
+            Near(rt60, target, target * 0.25f, what);
+        }
+    }
+    {
+        // Pre-delay: nothing out before it, something soon after.
+        static PlateReverb rv;
+        rv.Init(48000.f, g_reverb, kReverbFloats);
+        rv.SetPreDelay(0.05f); // 2400 samples
+        float before = 0.f, after = 0.f;
+        for(int i = 0; i < 4800; ++i)
+        {
+            float l, r;
+            rv.Process(i == 0 ? 1.f : 0.f, i == 0 ? 1.f : 0.f, l, r);
+            (i < 2400 ? before : after) += std::fabs(l) + std::fabs(r);
+        }
+        Check(before == 0.f, "nothing comes out before the pre-delay", before, 0.f);
+        Check(after > 0.f, "and the tail arrives after it", after, 1.f);
+    }
+    {
+        // Stereo: the two outputs read different parts of the tank, so they
+        // must not be a copy of each other.
+        static PlateReverb rv;
+        rv.Init(48000.f, g_reverb, kReverbFloats);
+        double ll = 0, rr = 0, lr = 0;
+        for(int i = 0; i < 48000; ++i)
+        {
+            float l, r;
+            rv.Process(i < 48 ? 1.f : 0.f, i < 48 ? 1.f : 0.f, l, r);
+            ll += l * l;
+            rr += r * r;
+            lr += l * r;
+        }
+        const float corr = static_cast<float>(lr / std::sqrt(ll * rr));
+        Check(std::fabs(corr) < 0.5f, "left and right are decorrelated", corr, 0.f);
+    }
+    {
+        // Longest SIZE, fed continuously for ten seconds: bounded, not
+        // building up. A reverb that blows up does so in exactly this case.
+        static PlateReverb rv;
+        rv.Init(48000.f, g_reverb, kReverbFloats);
+        rv.SetDecayTime(10.f);
+        rv.SetDamping(18000.f);
+        float    peak = 0.f;
+        uint32_t rng  = 7;
+        for(int i = 0; i < 480000; ++i)
+        {
+            rng            = rng * 1664525u + 1013904223u;
+            const float in = static_cast<float>(rng >> 9) / 4194304.f - 1.f;
+            float       l, r;
+            rv.Process(in * 0.5f, in * 0.5f, l, r);
+            peak = std::fmax(peak, std::fmax(std::fabs(l), std::fabs(r)));
+        }
+        Check(peak < 20.f && peak == peak, "10 s of input at the longest SIZE stays bounded", peak, 20.f);
+    }
+    {
+        // An undersized buffer is a silent reverb, never an overrun.
+        static PlateReverb rv;
+        Check(!rv.Init(48000.f, g_reverb, kReverbFloats / 2),
+              "an undersized buffer is refused", 1.f, 0.f);
+        float l = 1.f, r = 1.f;
+        rv.Process(1.f, 1.f, l, r);
+        Check(l == 0.f && r == 0.f, "and the reverb is silent", l, 0.f);
+    }
+
     std::printf("\ncompressor:\n");
     {
         MasterFx fx;
-        fx.Init(48000.f, g_delay, kDelayFrames, &g_reverb);
+        fx.Init(48000.f, g_delay, kDelayFrames, g_reverb, kReverbFloats);
         fx.SetParam(FxId::ReverbLevel, 0.f);
         fx.SetParam(FxId::DelayFeedback, 0.f);
         fx.SetParam(FxId::CompThreshold, 0.5f); // -30 dB
@@ -178,7 +287,7 @@ int main()
     std::printf("\nrouting:\n");
     {
         MasterFx fx;
-        fx.Init(48000.f, g_delay, kDelayFrames, &g_reverb);
+        fx.Init(48000.f, g_delay, kDelayFrames, g_reverb, kReverbFloats);
         fx.SetParam(FxId::ReverbLevel, 1.f);
 
         float l = 0.f, r = 0.f;
@@ -195,7 +304,7 @@ int main()
         // signal is read as a transient and gets a gain that has not caught up
         // yet. That is correct behaviour, not transparency failing.
         MasterFx fx;
-        fx.Init(48000.f, nullptr, 0, nullptr);
+        fx.Init(48000.f, nullptr, 0, nullptr, 0);
         float  l = 0.f, r = 0.f;
         MixBus b = Send(0.3f, 1.f, 1.f);
         for(int i = 0; i < 256; ++i)

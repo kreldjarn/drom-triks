@@ -30,18 +30,19 @@ struct AudioState
 class Machine
 {
   public:
-    /// `delay_buf` holds `2 * delay_frames` floats and `reverb` is borrowed;
-    /// both are supplied by the caller because where they live is a board
-    /// decision. ReverbSc alone is 395 kB, so it cannot be a member here —
-    /// Machine stays ~21.5 kB, which CLAUDE.md treats as a hard rule. Passing
-    /// nothing simply leaves the master effects silent.
-    void Init(float              sample_rate,
-              float             *delay_buf    = nullptr,
-              size_t             delay_frames = 0,
-              daisysp::ReverbSc *reverb       = nullptr)
+    /// `delay_buf` holds `2 * delay_frames` floats and `reverb_buf` holds
+    /// PlateReverb::BufferFloats(sample_rate). Both are supplied by the caller
+    /// because where ~1 MB of effect memory lives is a board decision, and
+    /// Machine stays ~50 kB — CLAUDE.md treats keeping it bounded as a hard
+    /// rule. Passing nothing leaves that effect silent; the dry mix still plays.
+    void Init(float   sample_rate,
+              float  *delay_buf     = nullptr,
+              size_t  delay_frames  = 0,
+              float  *reverb_buf    = nullptr,
+              size_t  reverb_floats = 0)
     {
         sample_rate_ = sample_rate;
-        fx_.Init(sample_rate, delay_buf, delay_frames, reverb);
+        fx_.Init(sample_rate, delay_buf, delay_frames, reverb_buf, reverb_floats);
 
         for(int i = 0; i < kNumTracks; ++i)
         {
@@ -165,16 +166,32 @@ class Machine
         for(int t = 0; t < kNumTracks; ++t)
             slots_[t].AdvanceLfo(static_cast<uint32_t>(frames));
 
-        for(size_t f = 0; f < frames; ++f)
+        // In chunks of up to MixBlock::kMaxFrames: each track renders its
+        // whole chunk through one virtual call per voice and per strip, rather
+        // than one each per sample (docs/02-firmware.md §10). Triggers still
+        // land on their exact sample; VoiceSlot splits the chunk there.
+        //
+        // The output is the per-sample loop's, with one exception: the voices
+        // that draw from the shared rand() now draw in a different order across
+        // tracks, so their noise is a different realisation of the same noise.
+        for(size_t done = 0; done < frames;)
         {
-            MixBus bus;
-            for(int t = 0; t < kNumTracks; ++t)
-                slots_[t].Process(bus);
+            size_t n = frames - done;
+            if(n > MixBlock::kMaxFrames)
+                n = MixBlock::kMaxFrames;
 
-            float l = 0.f, r = 0.f;
-            fx_.Process(bus, l, r);
-            out[2 * f]     = l * master_;
-            out[2 * f + 1] = r * master_;
+            bus_.Clear(n);
+            for(int t = 0; t < kNumTracks; ++t)
+                slots_[t].ProcessBlock(scratch_, n, bus_);
+
+            for(size_t f = 0; f < n; ++f)
+            {
+                float l = 0.f, r = 0.f;
+                fx_.Process(bus_.At(f), l, r);
+                out[2 * (done + f)]     = l * master_;
+                out[2 * (done + f) + 1] = r * master_;
+            }
+            done += n;
         }
 
         Publish();
@@ -403,6 +420,8 @@ class Machine
     ClockPll  pll_;
 
     MasterFx                fx_;
+    MixBlock                bus_;                           ///< one block of the mix
+    float                   scratch_[MixBlock::kMaxFrames]; ///< one voice's block
     Patch                   *snapshot_dst_ = nullptr;
     const Patch             *load_src_     = nullptr;
     std::atomic<bool>        load_done_{false};
@@ -411,7 +430,9 @@ class Machine
     AudioState              state_;
 
     float sample_rate_ = 48000.f;
-    float master_      = 0.35f;
+    // Fixed until there is a volume control: the panel has an analog pot after
+    // the codec (docs/01-hardware.md §2), the dev kit has none on its line outs.
+    float master_      = 0.05f;
     float last_bpm_    = 0.f;
 };
 

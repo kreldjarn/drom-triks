@@ -34,7 +34,7 @@ inline FilterMode ModeFromNorm(float v)
     return static_cast<FilterMode>(m);
 }
 
-class ChannelStrip : public IChannel
+class ChannelStrip final : public IChannel
 {
   public:
     void Init(float sample_rate) override
@@ -89,6 +89,12 @@ class ChannelStrip : public IChannel
 
     void Process(float in, MixBus &bus) override
     {
+        // A sleeping voice (VoiceSlot) feeds exact zeros; with both filters
+        // bypassed there is no tail to ring out, so this would only add zeros
+        // to the bus. Twelve strips run every sample, so it adds up.
+        if(in == 0.f && bypass_[0] && bypass_[1])
+            return;
+
         float x = Saturate(in);
         if(!bypass_[0]) x = RunFilter(0, x);
         if(!bypass_[1]) x = RunFilter(1, x);
@@ -104,6 +110,33 @@ class ChannelStrip : public IChannel
         bus.reverb_l += l * reverb_send_;
         bus.reverb_r += r * reverb_send_;
     }
+
+    /// Process() over a block, element for element: the same arithmetic in
+    /// the same order, so the bus receives the same floats. Exists so the
+    /// strip is one virtual call per block rather than per sample.
+    void ProcessBlock(const float *in, size_t n, MixBlock &bus) override
+    {
+        for(size_t i = 0; i < n; ++i)
+        {
+            if(in[i] == 0.f && bypass_[0] && bypass_[1])
+                continue;
+            float x = Saturate(in[i]);
+            if(!bypass_[0]) x = RunFilter(0, x);
+            if(!bypass_[1]) x = RunFilter(1, x);
+            const float l = x * gain_l_;
+            const float r = x * gain_r_;
+            bus.l[i] += l;
+            bus.r[i] += r;
+            bus.delay_l[i] += l * delay_send_;
+            bus.delay_r[i] += r * delay_send_;
+            bus.reverb_l[i] += l * reverb_send_;
+            bus.reverb_r[i] += r * reverb_send_;
+        }
+    }
+
+    /// With both filters bypassed there is nothing to ring out, so silence in
+    /// is nothing out.
+    bool PassesSilence() const override { return bypass_[0] && bypass_[1]; }
 
   private:
     /// 20 Hz to 18 kHz, exponential — a linear cutoff map puts everything

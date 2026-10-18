@@ -91,9 +91,17 @@ sequencer timing checked sample-by-sample long before a board arrives.
 
 ## Status
 
-**Phase 0 complete** on the host side; **nothing yet run on hardware.** `src/main.cpp` is the
-bring-up program — it blinks, plays a sine, and round-trips QSPI to prove the `BOOT_SRAM`
-decision.
+**Running on hardware** — the Seed3 Desktop Dev Kit. `src/main.cpp` is the instrument on the kit:
+the real machine, sequencer and UI from 16 keys, 8 pots and two toggles, with status text over the
+Seed's USB serial port ([firmware §10](docs/02-firmware.md#10-the-desktop-dev-kit)).
+
+**CPU measured on the H750.** The default kit's absolute worst case — every track on every step at
+maximum DECAY, with reverb, delay and compressor engaged — is **48 %** of the core, down from over
+176 % as first measured. DaisySP's drum models were recomputing filter coefficients every sample;
+`src/engine/dsp/` forks them with that hoisted, bit-identical to the originals. The reverb is now our
+own Dattorro plate, and voices render in blocks, also bit-identical to the per-sample engine.
+`host/dsptest.cpp` checks all of it sample for sample, and `src/bench.cpp` (`make PROGRAM=bench`) is
+the on-target profile. `src/bringup.cpp` (`make PROGRAM=bringup`) is the Phase 0 checklist program.
 
 **Phase 2 complete.** All eight voices — BD, SD, CH, OH from DaisySP; tom, clap, rimshot and
 2-op FM built from primitives — behind the `IVoice` seam.

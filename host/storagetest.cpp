@@ -95,6 +95,16 @@ int main()
            "reads as Empty, not as corruption");
     }
 
+    std::printf("\npeeking at a slot's header:\n");
+    {
+        // The dev kit lights occupied slots from this, so it has to agree with
+        // what a full load would say.
+        Is(g_storage.PeekPatch(3), Storage::Result::Ok, "a saved slot peeks as Ok");
+        Is(g_storage.PeekPatch(9), Storage::Result::Empty, "an empty one as Empty");
+        Is(g_storage.PeekPatch(kPatternSlots), Storage::Result::BadSlot,
+           "past the end is refused");
+    }
+
     std::printf("\noverwrite:\n");
     {
         MakePatch(g_a, 11);

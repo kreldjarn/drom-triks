@@ -69,6 +69,22 @@ class Storage
                         reinterpret_cast<uint8_t *>(&out));
     }
 
+    /// Whether a slot holds a loadable patch, from its header alone — for
+    /// showing which slots are occupied without copying 17 kB per slot.
+    Result PeekPatch(uint32_t slot) const
+    {
+        if(slot >= kPatternSlots)
+            return Result::BadSlot;
+        if(!flash_)
+            return Result::NoFlash;
+        const uint8_t *src = flash_->Read(PatternAddr(slot), sizeof(SaveHeader));
+        if(!src)
+            return Result::OutOfBounds;
+        SaveHeader h;
+        std::memcpy(&h, src, sizeof(h));
+        return Validate(h, static_cast<uint16_t>(sizeof(Pattern) + sizeof(Kit)));
+    }
+
     // ---- kits --------------------------------------------------------------
     //
     // A Kit has no embedded header (a Patch does), so a kit slot is a header

@@ -13,7 +13,24 @@ ifeq ($(shell command -v arm-none-eabi-gcc 2>/dev/null),)
 $(error arm-none-eabi-gcc not on PATH. See docs/00-toolchain.md §1 — note that the brew `arm-none-eabi-gcc` formula ships without newlib and will not work)
 endif
 
-TARGET = drom-triks
+# Which program to build. `devkit` is the instrument on the Seed3 Desktop Dev
+# Kit; `bringup` is the Phase 0 checklist program (docs/00-toolchain.md §6);
+# `bench` profiles CPU per voice on the H750 (src/bench.cpp).
+# Each gets its own TARGET so switching never links a stale object set.
+PROGRAM ?= devkit
+
+ifeq ($(PROGRAM),devkit)
+TARGET      = drom-triks
+CPP_SOURCES = src/main.cpp
+else ifeq ($(PROGRAM),bringup)
+TARGET      = drom-triks-bringup
+CPP_SOURCES = src/bringup.cpp
+else ifeq ($(PROGRAM),bench)
+TARGET      = drom-triks-bench
+CPP_SOURCES = src/bench.cpp
+else
+$(error Unknown PROGRAM "$(PROGRAM)": use devkit, bringup or bench)
+endif
 
 # BOOT_SRAM runs the app from SRAM (480 kB limit) with the image staged in QSPI
 # at offset 0x40000. The alternative, BOOT_QSPI, executes in place from QSPI —
@@ -22,8 +39,6 @@ TARGET = drom-triks
 #
 # This requires the Daisy bootloader on the board: `make program-boot` once.
 APP_TYPE = BOOT_SRAM
-
-CPP_SOURCES = src/main.cpp
 
 LIBDAISY_DIR = lib/libDaisy
 DAISYSP_DIR  = lib/DaisySP
@@ -36,8 +51,21 @@ DAISYSP_DIR  = lib/DaisySP
 # docs/11-production.md §3 and the note atop src/engine/fx.h.
 USE_DAISYSP_LGPL = 1
 
+# The engine is C++17 (inline constexpr, std::atomic<float> members), and the
+# core Makefile defaults to gnu++14 — fine for the bring-up stub, which never
+# included the engine, and a wall of errors for anything that does.
+CPP_STANDARD = -std=gnu++17
+
+# libDaisy's BOOT_SRAM script plus one section, .sram_bss, for data in the free
+# AXI SRAM after the app image (the reverb). See the comment in the file.
+LDSCRIPT = ld/drom_sram.lds
+
 SYSTEM_FILES_DIR = $(LIBDAISY_DIR)/core
 include $(SYSTEM_FILES_DIR)/Makefile
+
+# newlib-nano drops %f from printf unless asked, and prints nothing in its
+# place: the status text would read " BPM" with no number and no warning.
+LDFLAGS += -u _printf_float
 
 # --- Additions beyond the stock Daisy template -------------------------------
 
@@ -72,3 +100,12 @@ gdb: $(BUILD_DIR)/$(TARGET).elf
 program-stlink: $(BUILD_DIR)/$(TARGET).bin
 	openocd $(OOCD_FLAGS) \
 		-c "program $< $(FLASH_ADDRESS) verify reset exit"
+
+# Flash over the Seed's USB without touching the BOOT button: the ST-Link
+# resets the board, and the Daisy bootloader then opens its DFU window for
+# ~2 s, which dfu-util waits for (-w). Needs the bootloader installed once
+# (`make program-boot`) and both the ST-Link and the Seed's USB-C attached.
+.PHONY: flash
+flash: $(BUILD_DIR)/$(TARGET).bin
+	openocd $(OOCD_FLAGS) -c "init; reset run; shutdown"
+	dfu-util -w -a 0 -s $(FLASH_ADDRESS):leave -D $< -d ,0483:$(USBPID)

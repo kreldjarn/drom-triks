@@ -5,30 +5,22 @@
 #include "daisysp.h"
 #include "daisysp-lgpl.h"
 #include "params.h"
+#include "reverb.h"
 #include "voice.h"
 
 // Master effects: one stereo delay, one reverb, one compressor.
 //
-// The reverb and compressor are DaisySP's, from **DaisySP-LGPL** — a separate
-// library under LGPL-2.1, where DaisySP proper is MIT. Two things follow, and
-// only the second is urgent:
+// The delay and reverb are ours; both take caller-provided buffers, because
+// where ~165 kB (reverb) and ~768 kB (delay) live is a board decision, not an
+// engine one. The reverb is a Dattorro plate (reverb.h). It replaced DaisySP's
+// ReverbSc, which was the largest cost on the H750, LGPL, and 395 kB held by
+// value — see docs/02-firmware.md §10.
 //
-//   * **Licensing bites only on distribution.** Prototypes carry no obligation.
-//     Shipping units means including the licence text, saying the library is
-//     used, and — because this is a static link — offering something a user can
-//     relink against, i.e. our object files. It does *not* require opening our
-//     own firmware; that is GPL, not LGPL. A page and a zip at ship time.
-//
-//   * **ReverbSc is `float aux_[98936]` — 395 kB, held by value.** That is three
-//     times the whole 128 kB DTCM, so it must not be a member of Machine (which
-//     CLAUDE.md pins at ~21.5 kB, and that rule is load-bearing). It is injected
-//     by pointer and lives in SDRAM on the Seed3. This, not the licence, is what
-//     would force a swap: an H743 board with no SDRAM cannot host it, and the
-//     replacement is a Freeverb-shaped plate of about 50 kB.
-//
-// MasterFx is the seam for that swap — nothing above it knows which reverb is
-// underneath. The delay is ours because DaisySP has no stereo cross-feed delay,
-// and it takes a caller-provided buffer for the same placement reason.
+// The compressor is still DaisySP's, from **DaisySP-LGPL** — a separate
+// library under LGPL-2.1, where DaisySP proper is MIT. Licensing bites only on
+// distribution: shipping units means the licence text, an acknowledgement and,
+// because this is a static link, our object files for relinking. It does not
+// require opening our firmware. docs/11-production.md §3.
 
 namespace drom {
 
@@ -127,19 +119,20 @@ class StereoDelay
 /// The master bus: the two sends into their effects, summed back with the dry
 /// signal, then compressed.
 ///
-/// `reverb` is borrowed, not owned — see the note at the top of this file.
+/// Both buffers are borrowed, not owned — see the note at the top of this file.
+/// A null or undersized reverb buffer leaves the reverb silent.
 class MasterFx
 {
   public:
     void Init(float sample_rate,
               float             *delay_buf,
               size_t             delay_frames,
-              daisysp::ReverbSc *reverb)
+              float             *reverb_buf,
+              size_t             reverb_floats)
     {
         delay_.Init(sample_rate, delay_buf, delay_frames);
-        reverb_ = reverb;
-        if(reverb_)
-            reverb_->Init(sample_rate);
+        has_reverb_  = reverb_.Init(sample_rate, reverb_buf, reverb_floats);
+        reverb_sleep_ = reverb_.LongestPathSamples();
         comp_.Init(sample_rate);
         comp_.AutoMakeup(false);
         for(int i = 0; i < kNumFxParams; ++i)
@@ -158,17 +151,15 @@ class MasterFx
             case FxId::DelayWidth:
             case FxId::DelayTone: delay_.SetParam(id, v); break;
 
-            // Stop short of 1.0: ReverbSc's own header says the tail becomes
-            // infinite there, which is a stuck note rather than a long reverb.
-            case FxId::ReverbSize:
-                if(reverb_) reverb_->SetFeedback(0.70f + v * 0.28f);
-                break;
+            // A decay time, 0.3 s to 10 s, exponential: every step of the knob
+            // is the same ratio longer, which is how decay is heard.
+            case FxId::ReverbSize: reverb_.SetDecayTime(0.3f * std::pow(100.f / 3.f, v)); break;
             // More damping means a lower cutoff, so the knob reads as "darker".
-            case FxId::ReverbDamp:
-                if(reverb_) reverb_->SetLpFreq(18000.f - v * 16500.f);
+            case FxId::ReverbDamp: reverb_.SetDamping(18000.f - v * 16500.f); break;
+            case FxId::ReverbLevel: reverb_level_ = v; break;
+            case FxId::ReverbPreDelay:
+                reverb_.SetPreDelay(v * PlateReverb::kMaxPreDelaySeconds);
                 break;
-            case FxId::ReverbLevel:    reverb_level_ = v; break;
-            case FxId::ReverbPreDelay: break; // reserved until the line exists
 
             // DaisySP takes real units, so the normalised knobs are mapped here
             // rather than in the caller. Times sweep exponentially: a linear map
@@ -180,6 +171,8 @@ class MasterFx
             case FxId::CompMakeup:    comp_.SetMakeup(v * 12.f); break;
             default: break;
         }
+        comp_unity_ = params_[static_cast<int>(FxId::CompRatio)] <= 0.f
+                      && params_[static_cast<int>(FxId::CompMakeup)] <= 0.f;
     }
 
     float param(FxId id) const { return params_[static_cast<int>(id)]; }
@@ -191,15 +184,48 @@ class MasterFx
         delay_.Process(bus.delay_l, bus.delay_r, dl, dr);
 
         float rl = 0.f, rr = 0.f;
-        if(reverb_)
+        if(has_reverb_)
         {
             // The delay feeds the reverb as well as the output, so a delayed
             // hit picks up the same space as the dry one.
-            reverb_->Process(bus.reverb_l + dl, bus.reverb_r + dr, &rl, &rr);
+            const float in_l = bus.reverb_l + dl, in_r = bus.reverb_r + dr;
+            const bool  silent_in = in_l == 0.f && in_r == 0.f;
+
+            // The sends default to zero, so the reverb usually has nothing to
+            // do. It sleeps once its input is silent and its own output has
+            // been below -120 dB for the longest path through it (~0.9 s),
+            // so nothing audible can still be circulating — every tank line
+            // reaches an output tap far sooner than that. It wakes on the
+            // first non-zero input sample.
+            //
+            // Not skipped merely because REV LVL is 0: the delay lines would
+            // freeze holding an old tail, and turning the level up would
+            // replay it.
+            if(silent_in && reverb_quiet_ >= reverb_sleep_)
+            {
+                rl = rr = 0.f;
+            }
+            else
+            {
+                reverb_.Process(in_l, in_r, rl, rr);
+                const bool quiet_out
+                    = std::fabs(rl) < kSilence && std::fabs(rr) < kSilence;
+                reverb_quiet_ = silent_in && quiet_out ? reverb_quiet_ + 1 : 0;
+            }
         }
 
         out_l = bus.l + dl + rl * reverb_level_;
         out_r = bus.r + dr + rr * reverb_level_;
+
+        // At ratio 1:1 with no makeup the compressor's gain is exactly 1.0
+        // once its gain-reduction state has decayed (it can only shrink at
+        // 1:1, and pow10f(0) is exactly 1), so processing it changes nothing
+        // but costs a log and an exp per call. Apply(1) reads that gain
+        // exactly. The detector does not run while bypassed, so raising the
+        // ratio later starts it from a stale envelope; it settles within the
+        // attack time.
+        if(comp_unity_ && comp_.Apply(1.f) == 1.f)
+            return;
 
         // Linked stereo: one detector driving both sides. Independent detectors
         // pull the image toward whichever side is loud, which on a drum bus
@@ -213,10 +239,16 @@ class MasterFx
     daisysp::Compressor &compressor() { return comp_; }
 
   private:
+    /// -120 dBFS: far below the 24-bit codec's own floor.
+    static constexpr float kSilence = 1e-6f;
     StereoDelay          delay_;
-    daisysp::ReverbSc   *reverb_ = nullptr;
+    PlateReverb          reverb_;
+    bool                 has_reverb_   = false;
+    uint32_t             reverb_sleep_ = 0;
     daisysp::Compressor  comp_;
     float                reverb_level_ = 0.f;
+    uint32_t             reverb_quiet_ = 0;
+    bool                 comp_unity_   = false;
     float                params_[kNumFxParams] = {};
 };
 

@@ -47,12 +47,22 @@ sounds bad in a way that is very hard to trace back afterwards.
 PB14/PB15, so it cannot move to other pins). Don't spend them without saying so.
 
 **Voices go through `IVoice`.** That interface is what makes sample playback and analog voices
-later additions rather than rewrites of the sequencer, mixer and UI. Don't bypass it.
+later additions rather than rewrites of the sequencer, mixer and UI. Don't bypass it. A concrete
+voice derives from `BlockVoice<Self>`, not `VoiceBase` directly: the engine renders in blocks, and
+without it the voice silently falls back to a virtual call per sample.
 
-**`Machine` is ~21.5 kB — never a stack local.** It holds the patch (16.9 kB) plus voices and the
-command queue. Declaring one as a local would overflow a typical embedded main stack. Hold it
-statically or as a member of something static, on the host as well, so the tests exercise the
-same shape the firmware uses.
+**`Machine` is ~50 kB — never a stack local.** It holds the patch (~31 kB) plus twelve machine
+slots, voices and the command queue (measured on the ARM build; see `docs/02-firmware.md` §5).
+Declaring one as a local would overflow a typical embedded main stack. Hold it statically or as a
+member of something static, on the host as well, so the tests exercise the same shape the firmware
+uses.
+
+**CPU is measured on the H750, never inferred from the host.** The budget is 10 000 cycles per
+sample. DaisySP's drum models once cost 176 % of it — invisibly on the Mac — by recomputing filter
+coefficients (`sinf`/`powf` in `Svf::SetFreq`) every sample. Compute coefficients when a parameter
+changes, not per sample; use the forks in `src/engine/dsp/` over the DaisySP originals; and check a
+new voice with `make PROGRAM=bench` *sounding* (DECAY max), not after a single hit. See
+`docs/02-firmware.md` §10.
 
 **`src/engine/` must not include libDaisy.** DaisySP only. That constraint is what lets the same
 engine code build natively (`make -C host`) and be listened to without a board, which is how
